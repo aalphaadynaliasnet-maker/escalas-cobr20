@@ -342,6 +342,54 @@ def converter_pdf_para_excel_validado(uploaded_pdf):
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue(), len(os_encontradas), sorted(set(range(1, 121)) - os_encontradas)
+import base64
+
+def aplicar_visual_cp(img_path="icon.png"):
+    bg_css = ""
+    try:
+        with open(img_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        bg_css = f"background-image: linear-gradient(120deg, rgba(0, 55, 30, 0.82), rgba(15, 23, 42, 0.72)), url('data:image/png;base64,{b64}');"
+    except Exception:
+        bg_css = "background: linear-gradient(120deg, #006837, #0F172A);"
+
+    st.markdown(f"""
+    <style>
+        .hero-cp {{
+            {bg_css}
+            background-size: cover;
+            background-position: center 65%;
+            padding: 28px 24px;
+            border-radius: 16px;
+            color: white;
+            margin-bottom: 18px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        }}
+        .hero-cp h1 {{
+            color: #FFFFFF !important;
+            margin: 0;
+            font-size: 1.9rem;
+            letter-spacing: 0.5px;
+        }}
+        .hero-cp p {{
+            color: #E2E8F0 !important;
+            margin: 6px 0 0 0;
+            font-size: 0.95rem;
+        }}
+        div[data-testid="stMetric"] {{
+            background-color: #FFFFFF;
+            border-left: 5px solid #006837;
+            padding: 12px 14px;
+            border-radius: 10px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+        }}
+    </style>
+    <div class="hero-cp">
+        <h1>Escalas COBR20</h1>
+        <p>Gestão e Comparação de Escalas Ferroviárias &bull; <b>by Luís Maia</b></p>
+    </div>
+    """, unsafe_allow_html=True)
+
 def processar_comparacao_mobile(d_ant, d_nov, data_ini_str):
     sems_ant, sems_nov = calcular_semanas_detalhado(d_ant, data_ini_str), calcular_semanas_detalhado(d_nov, data_ini_str)
     c_ant, c_nov, os_alt, os_gan, os_sup, rep_alt = {}, {}, 0, 0, 0, []
@@ -418,8 +466,7 @@ def processar_comparacao_mobile(d_ant, d_nov, data_ini_str):
     resumo = {"rep_ant": rep_tot_ant, "rep_nov": rep_tot_nov, "dif_rep": dif_rep, "scb": scb, "sos": sos, "h_ant": fmt_hm(m_ant), "h_nov": fmt_hm(m_nov)}
     return pdf_completo, pdf_so_os, resumo
 
-st.title("🚄 Escalas COBR20")
-st.caption("Gestão e Comparação de Escalas Ferroviárias — by Luís Maia")
+aplicar_visual_cp("icon.png")
 
 aba_comp, aba_conv = st.tabs(["📊 Comparar Escalas", "🔄 Converter PDF → Excel"])
 
@@ -463,4 +510,3 @@ with aba_conv:
             st.success("✅ Validação 100% OK: Todas as 120 OS foram convertidas com estrutura oficial CP!")
         else:
             st.warning(f"⚠️ Lidas {total_os}/120 OS. Em falta: {em_falta}")
-        st.download_button("📗 Descarregar Excel Oficial (.xlsx)", data=xlsx_bytes, file_name=nome_xlsx, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
