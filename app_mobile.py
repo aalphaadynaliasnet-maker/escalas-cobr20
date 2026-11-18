@@ -170,7 +170,7 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
     titulo_sec("Resumo de OS Alteradas - Escala COBR20" if so_os else "Comparação Completa de Escalas COBR20")
     pdf.ln(1)
     titulo_sec("1. Alterações por Ordem de Serviço (OS)")
-    l_os =
+    l_os = (20, 46, 105, 105)
     cabecalho_tabela(["OS", "Tipo de Alteração", "Escala Anterior", "Escala Nova (Negrito)"], l_os)
 
     for os_str, tp, ta, tn, cor_rgb in lista_os_alt:
@@ -197,7 +197,7 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
 
     pdf.add_page()
     titulo_sec("2. Mobilidade de Comboios entre OS")
-    l_cb =
+    l_cb = (24, 46, 50, 50, 53, 53)
     cabecalho_tabela(["Comboio", "Movimento", "Saiu das OS", "Entrou nas OS", "OS Antes", "OS Agora"], l_cb)
     for cb, mv, saiu, entrou, oa, on, cor_rgb in lista_cb_mov:
         pdf.set_fill_color(*cor_rgb)
@@ -216,7 +216,7 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
 
     pdf.ln(5)
     titulo_sec("3. Alterações nos Repousos Fora da Sede (REP F)")
-    l_rep =
+    l_rep = (22, 54, 100, 100)
     cabecalho_tabela(["OS", "Situação Repouso", "Repousos Antes", "Repousos Agora"], l_rep)
     for os_s, st_r, ra, rn, cor_rgb in lista_rep_alt:
         pdf.set_fill_color(*cor_rgb)
@@ -231,7 +231,7 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
 
     pdf.ln(5)
     titulo_sec("4. Balanço Final: Ganhos vs Perdas")
-    l_bal =
+    l_bal = (115, 45, 116)
     cabecalho_tabela(["Indicador", "Antes -> Agora", "Impacto / Saldo"], l_bal)
     for ind, qtd, obs, cor_rgb in balanco_rows:
         pdf.set_fill_color(*cor_rgb)
@@ -243,7 +243,7 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
 
     pdf.add_page()
     titulo_sec("5. Distribuição Diária da Escala (Serviços, SUPRA e Descanso)")
-    l_dist =
+    l_dist = (48, 52, 36, 52, 44, 44)
     cabecalho_tabela(["Dia da Semana", "Serviços (Ant -> Nov)", "Dif.", "SUPRA (Ant -> Nov)", "Descanso", "Total OS"], l_dist)
     for d_row in dist_rows:
         pdf.set_fill_color(*d_row.__getitem__(6))
@@ -254,7 +254,7 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
 
     pdf.ln(5)
     titulo_sec("6. Cômputo a cada 12 Semanas (Rotação 120 Semanas)")
-    l_sem =
+    l_sem = (45, 55, 58, 58, 60)
     cabecalho_tabela(["Bloco", "Semanas", "Horas Anterior", "Horas Nova", "Diferença (12 Sem.)"], l_sem)
     for s_row in sem_rows:
         pdf.set_fill_color(255, 235, 156)
@@ -264,7 +264,6 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
         pdf.ln()
 
     return bytes(pdf.output())
-
 def converter_pdf_para_excel_validado(uploaded_pdf):
     bytes_data = uploaded_pdf.read()
     todas_linhas = []
