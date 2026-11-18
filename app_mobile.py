@@ -455,6 +455,23 @@ def processar_comparacao_mobile(d_ant, d_nov, data_ini_str):
 
 aplicar_visual_cp("alfa-pendular-wext3_856.jpg")
 
+def verificar_acesso():
+    if st.session_state.get("autenticado"):
+        return True
+    st.markdown("### 🔒 Acesso Reservado")
+    senha_digitada = st.text_input("Insere a palavra-passe de acesso:", type="password")
+    if st.button("Entrar", type="primary"):
+        senha_correta = st.secrets.get("SENHA_APP", "COBR20")
+        if senha_digitada == senha_correta:
+            st.session_state["autenticado"] = True
+            st.rerun()
+        else:
+            st.error("❌ Palavra-passe incorreta.")
+    return False
+
+if not verificar_acesso():
+    st.stop()
+
 aba_comp, aba_conv = st.tabs(["📊 Comparar Escalas", "🔄 Converter PDF → Excel"])
 
 with aba_comp:
