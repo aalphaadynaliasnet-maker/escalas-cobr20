@@ -170,7 +170,7 @@ def ler_ficheiro_carregado(uploaded_file):
     if nome.endswith(".pdf"):
         todas_linhas = []
         with pdfplumber.open(io.BytesIO(bytes_data)) as pdf:
-            txt1 = pdf.pages.extract_text() or ""
+            txt1 = pdf.pages[0].extract_text() or ""
             m_esc = re.search(r'\b([A-Z]{3}R\d{2})\b', txt1)
             if m_esc:
                 meta["Escala"] = m_esc.group(1)
