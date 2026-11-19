@@ -615,5 +615,92 @@ with aba_comp:
                 p_comp, p_os, res = processar_comparacao_mobile(d_a, d_n, data_ini.strftime("%Y-%m-%d"), titulo_esc=meta_n["Escala"])
                 st.session_state["mob_res"] = (p_comp, p_os, res, meta_n["Escala"])
 
-    if "mob_res" in st.session_state:
+        if "mob_res" in st.session_state:
         p_comp, p_os, res, cod_esc_res = st.session_state["mob_res"]
+        st.success(f"Comparação concluída ({cod_esc_res})!")
+        c1, c2 = st.columns(2)
+        c1.metric("Repousos Fora", f"{res['rep_ant']} → {res['rep_nov']}", f"{res['dif_rep']:+d}")
+        c2.metric("Saldo Comboios", f"{res['scb']:+d}")
+        c3, c4 = st.columns(2)
+        c3.metric("Saldo OS Serviço", f"{res['sos']:+d}")
+        c4.metric("Média Horas/Sem", res["h_nov"], f"Antes: {res['h_ant']}")
+
+        st.download_button("📕 Descarregar PDF Completo", data=p_comp, file_name=f"Comparacao_{cod_esc_res}.pdf", mime="application/pdf", use_container_width=True)
+        st.download_button("📋 Descarregar PDF Só OS Alteradas", data=p_os, file_name=f"OS_Alteradas_{cod_esc_res}.pdf", mime="application/pdf", use_container_width=True)
+
+with aba_edit:
+    st.markdown("Edita as **OS pretendidas** usando os números dos comboios (ex: `722 - (TR) - 4674`). O sistema preenche horários via `comboios.csv` e audita **Repouso Sede (14h)**, **Fora (9h)**, **TR (45m)** e **PNT (6h-9h)**.")
+    with st.expander("🚆 Gerir Horários de Comboios (comboios.csv)", expanded=False):
+        c_g1, c_g2, c_g3, c_g4, c_g5 = st.columns(5)
+        n_cb = c_g1.text_input("Comboio", placeholder="722")
+        n_or = c_g2.text_input("Origem", placeholder="AVO")
+        n_pa = c_g3.text_input("Partida", placeholder="15:56")
+        n_de = c_g4.text_input("Destino", placeholder="COB")
+        n_ch = c_g5.text_input("Chegada", placeholder="16:30")
+        if st.button("➕ Guardar Comboio na Sessão"):
+            if n_cb.strip() and n_pa.strip() and n_ch.strip():
+                st.session_state["base_comboios"][n_cb.strip()] = {"Origem": n_or.strip() or "EST", "Partida": n_pa.strip(), "Destino": n_de.strip() or "EST", "Chegada": n_ch.strip()}
+                st.success(f"Comboio {n_cb} adicionado!")
+        pdf_hor = st.file_uploader("Ou extrair comboios de um PDF de Horários CP:", type=["pdf"], key="pdf_hor")
+        if pdf_hor and st.button("📥 Extrair Horários do PDF"):
+            ext = extrair_horarios_de_pdf_cp(pdf_hor)
+            st.session_state["base_comboios"].update(ext)
+            st.success(f"Extraídos {len(ext)} comboios do PDF!")
+    arq_sim = st.file_uploader("Carrega a Escala Base para Editar (.xlsx ou .pdf)", type=["xlsx", "pdf"], key="sim")
+    if arq_sim:
+        d_sim, meta_sim = ler_ficheiro_carregado(arq_sim)
+        tot_os_sim = obter_total_os(d_sim)
+        os_sel = st.multiselect("Seleciona as OS que queres editar:", options=list(range(1, tot_os_sim + 1)), default=[min(117, tot_os_sim)])
+        if os_sel:
+            linhas_ed = [x for x in d_sim if x["OS"] in os_sel]
+            df_ed = pd.DataFrame(linhas_ed)[["OS", "Dias", "LocalApr", "HoraApr", "Serv", "LocalRet", "HoraRet", "PNT", "RepFora"]]
+            df_editado = st.data_editor(df_ed, use_container_width=True, hide_index=True, num_rows="dynamic")
+
+            if st.button("⚡ Simular Impacto e Auditar Regras", type="primary", use_container_width=True):
+                base_cb = st.session_state["base_comboios"]
+                infracoes, comp_pdf = [], []
+                for idx_r, row_e in df_editado.iterrows():
+                    os_num = int(row_e["OS"])
+                    serv_novo = str(row_e["Serv"])
+                    lapr, hapr, lret, hret, pnt_calc, alerts = auditar_linha_editada(serv_novo, base_cb, sede=meta_sim["Sede"])
+                    for al in alerts:
+                        infracoes.append(f"OS {os_num:03d} [{row_e['Dias']}]: {al}")
+
+                    os_seg = 1 if os_num == tot_os_sim else os_num + 1
+                    linhas_seg = [x for x in d_sim if x["OS"] == os_seg and hora_para_min(x["HoraApr"]) is not None]
+                    h_fim_m = hora_para_min(hret or row_e["HoraRet"])
+                    if h_fim_m is not None and linhas_seg:
+                        h_ini_seg = hora_para_min(linhas_seg[0]["HoraApr"])
+                        desc_m = (h_ini_seg - h_fim_m) if (h_fim_m < 360 and h_ini_seg >= h_fim_m) else ((1440 - h_fim_m) + h_ini_seg)
+                        eh_fora = bool(row_e["RepFora"]) or ((lret or row_e["LocalRet"]) != meta_sim["Sede"])
+                        req_m = 9 * 60 if eh_fora else 14 * 60
+                        if desc_m < req_m:
+                            infracoes.append(f"🔴 OS {os_num:03d} -> OS {os_seg:03d}: Falta de Repouso ({fmt_hm(desc_m)} | Mín: {'09h00 Fora' if eh_fora else '14h00 Sede'})")
+
+                    orig_txt = " | ".join(x["Serv"] for x in linhas_ed if x["OS"] == os_num)
+                    comp_pdf.append((f"OS {os_num:03d}", orig_txt, f"{serv_novo} (Apr:{hapr or row_e['HoraApr']} Ret:{hret or row_e['HoraRet']} PNT:{pnt_calc or row_e['PNT']})"))
+
+                if not infracoes:
+                    infracoes.append("✅ Nenhuma infração detetada! Todos os repousos (14h sede / 9h fora), TR (45m) e PNT estão conformes.")
+                for inf in infracoes:
+                    st.write(inf)
+                pdf_sim_bytes = gerar_pdf_impacto_simulacao(comp_pdf, infracoes, titulo_esc=meta_sim["Escala"])
+                st.download_button("📕 Descarregar PDF de Impacto da Simulação", data=pdf_sim_bytes, file_name=f"Simulacao_{meta_sim['Escala']}.pdf", mime="application/pdf", use_container_width=True)
+
+with aba_conv:
+    st.markdown("Converte qualquer **PDF oficial ORV da CP** para **Excel (`.xlsx`)** mantendo a estrutura exata das 11 colunas e validação automática.")
+    pdf_conv = st.file_uploader("Carrega o PDF da Escala CP", type=["pdf"], key="conv")
+    if pdf_conv:
+        if st.button("⚙️ Converter PDF → Excel (.xlsx)", type="primary", use_container_width=True):
+            with st.spinner("A extrair e validar as OS..."):
+                xlsx_bytes, lidas, tot_esp, em_falta = converter_pdf_para_excel_validado(pdf_conv)
+                st.session_state["conv_res"] = (xlsx_bytes, lidas, tot_esp, em_falta, pdf_conv.name.replace(".pdf", ".xlsx"))
+
+    if "conv_res" in st.session_state:
+        xlsx_bytes, lidas, tot_esp, em_falta, nome_xlsx = st.session_state["conv_res"]
+        if lidas == tot_esp and not em_falta:
+            st.success(f"✅ Validação 100% OK: Todas as {tot_esp} OS foram convertidas com estrutura oficial CP!")
+        else:
+            st.warning(f"⚠️ Lidas {lidas}/{tot_esp} OS. Em falta: {em_falta}")
+        st.download_button("📗 Descarregar Excel Oficial (.xlsx)", data=xlsx_bytes, file_name=nome_xlsx, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+
