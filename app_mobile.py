@@ -724,7 +724,7 @@ with aba_edit:
         d_sim, meta_sim = ler_ficheiro_carregado(arq_sim)
         tot_os_sim = obter_total_os(d_sim)
         os_sel = st.multiselect("Seleciona as OS que queres editar:", options=list(range(1, tot_os_sim + 1)), default=[min(117, tot_os_sim)])
-               if os_sel:
+    if os_sel:
             # Criação de coluna de seleção explícita e filtragem de linhas marcadas para auditoria e PDF
             # (Ver código completo no ficheiro app_mobile.py do repositório)
             ...
