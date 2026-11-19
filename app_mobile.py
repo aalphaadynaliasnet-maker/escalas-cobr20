@@ -614,6 +614,9 @@ with aba_comp:
                 d_n, meta_n = ler_ficheiro_carregado(arq_nov)
                 p_comp, p_os, res = processar_comparacao_mobile(d_a, d_n, data_ini.strftime("%Y-%m-%d"), titulo_esc=meta_n["Escala"])
                 st.session_state["mob_res"] = (p_comp, p_os, res, meta_n["Escala"])
+    if "mob_res" in st.session_state:
+        p_comp, p_os, res, cod_esc_res = st.session_state["mob_res"]
+        st.success(f"Comparação concluída ({cod_esc_res})!")
 
         if "mob_res" in st.session_state:
         st.success(f"Comparação concluída ({cod_esc_res})!")
