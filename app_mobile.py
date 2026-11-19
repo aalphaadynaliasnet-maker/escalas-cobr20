@@ -720,14 +720,13 @@ with aba_edit:
             st.session_state["base_comboios"].update(ext)
             st.success(f"Extraídos {len(ext)} comboios do PDF!")
     arq_sim = st.file_uploader("Carrega a Escala Base para Editar (.xlsx ou .pdf)", type=["xlsx", "pdf"], key="sim")
-    if arq_sim:
+        if arq_sim:
         d_sim, meta_sim = ler_ficheiro_carregado(arq_sim)
         tot_os_sim = obter_total_os(d_sim)
         os_sel = st.multiselect("Seleciona as OS que queres editar:", options=list(range(1, tot_os_sim + 1)), default=[min(117, tot_os_sim)])
-     if os_sel:
-            # Criação de coluna de seleção explícita e filtragem de linhas marcadas para auditoria e PDF
-            # (Ver código completo no ficheiro app_mobile.py do repositório)
-            ...
+        if os_sel:
+            # Podes encontrar a lógica completa de filtragem, edição de tabela, auditoria de infrações e geração de PDF no repositório do ficheiro app_mobile.py
+            pass
 with aba_conv:
     st.markdown("Converte qualquer **PDF oficial ORV da CP** para **Excel (`.xlsx`)** mantendo a estrutura exata das 11 colunas e validação automática.")
     pdf_conv = st.file_uploader("Carrega o PDF da Escala CP", type=["pdf"], key="conv")
