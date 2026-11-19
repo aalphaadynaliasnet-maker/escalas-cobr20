@@ -614,11 +614,9 @@ with aba_comp:
                 d_n, meta_n = ler_ficheiro_carregado(arq_nov)
                 p_comp, p_os, res = processar_comparacao_mobile(d_a, d_n, data_ini.strftime("%Y-%m-%d"), titulo_esc=meta_n["Escala"])
                 st.session_state["mob_res"] = (p_comp, p_os, res, meta_n["Escala"])
+
     if "mob_res" in st.session_state:
         p_comp, p_os, res, cod_esc_res = st.session_state["mob_res"]
-        st.success(f"Comparação concluída ({cod_esc_res})!")
-
-        if "mob_res" in st.session_state:
         st.success(f"Comparação concluída ({cod_esc_res})!")
         c1, c2 = st.columns(2)
         c1.metric("Repousos Fora", f"{res['rep_ant']} → {res['rep_nov']}", f"{res['dif_rep']:+d}")
@@ -629,7 +627,6 @@ with aba_comp:
 
         st.download_button("📕 Descarregar PDF Completo", data=p_comp, file_name=f"Comparacao_{cod_esc_res}.pdf", mime="application/pdf", use_container_width=True)
         st.download_button("📋 Descarregar PDF Só OS Alteradas", data=p_os, file_name=f"OS_Alteradas_{cod_esc_res}.pdf", mime="application/pdf", use_container_width=True)
-
 with aba_edit:
     st.markdown("Edita as **OS pretendidas** usando os números dos comboios (ex: `722 - (TR) - 4674`). O sistema preenche horários via `comboios.csv` e audita **Repouso Sede (14h)**, **Fora (9h)**, **TR (45m)** e **PNT (6h-9h)**.")
     with st.expander("🚆 Gerir Horários de Comboios (comboios.csv)", expanded=False):
