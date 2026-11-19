@@ -616,7 +616,6 @@ with aba_comp:
                 st.session_state["mob_res"] = (p_comp, p_os, res, meta_n["Escala"])
 
         if "mob_res" in st.session_state:
-        p_comp, p_os, res, cod_esc_res = st.session_state["mob_res"]
         st.success(f"Comparação concluída ({cod_esc_res})!")
         c1, c2 = st.columns(2)
         c1.metric("Repousos Fora", f"{res['rep_ant']} → {res['rep_nov']}", f"{res['dif_rep']:+d}")
