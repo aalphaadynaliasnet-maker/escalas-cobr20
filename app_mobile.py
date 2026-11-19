@@ -277,7 +277,7 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
     titulo_sec(f"Resumo de OS Alteradas - Escala {titulo_esc}" if so_os else f"Comparação Completa - Escala {titulo_esc}")
     pdf.ln(1)
     titulo_sec("1. Alterações por Ordem de Serviço (OS)")
-    l_os = [20, 46, 105, 105]
+    l_os = (20, 46, 105, 105)
     cabecalho_tabela(["OS", "Tipo de Alteração", "Escala Anterior", "Escala Nova (Negrito)"], l_os)
 
     for os_str, tp, ta, tn, cor_rgb in lista_os_alt:
@@ -304,7 +304,7 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
 
     pdf.add_page()
     titulo_sec("2. Mobilidade de Comboios entre OS")
-    l_cb = [24, 46, 50, 50, 53, 53]
+    l_cb = (24, 46, 50, 50, 53, 53)
     cabecalho_tabela(["Comboio", "Movimento", "Saiu das OS", "Entrou nas OS", "OS Antes", "OS Agora"], l_cb)
     for cb, mv, saiu, entrou, oa, on, cor_rgb in lista_cb_mov:
         pdf.set_fill_color(*cor_rgb)
@@ -315,7 +315,7 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
 
     pdf.ln(5)
     titulo_sec("3. Alterações nos Repousos Fora da Sede (REP F)")
-    l_rep = [22, 54, 100, 100]
+    l_rep = (22, 54, 100, 100)
     cabecalho_tabela(["OS", "Situação Repouso", "Repousos Antes", "Repousos Agora"], l_rep)
     for os_s, st_r, ra, rn, cor_rgb in lista_rep_alt:
         pdf.set_fill_color(*cor_rgb)
@@ -326,10 +326,133 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
 
     pdf.ln(5)
     titulo_sec("4. Balanço Final: Ganhos vs Perdas")
-    l_bal = [115, 45, 116]
+    l_bal = (115, 45, 116)
     cabecalho_tabela(["Indicador", "Antes -> Agora", "Impacto / Saldo"], l_bal)
     for ind, qtd, obs, cor_rgb in balanco_rows:
         pdf.set_fill_color(*cor_rgb)
+        pdf.set_font("Helvetica", "B", 8.5)
+        pdf.cell(l_bal[0], 7, limpar_latin1(ind), border=1, fill=True)
+        pdf.cell(l_bal[1], 7, limpar_latin1(qtd), border=1, align="C", fill=True)
+        pdf.cell(l_bal[2], 7, limpar_latin1(obs), border=1, fill=True)
+        pdf.ln()
+
+    pdf.add_page()
+    titulo_sec("5. Distribuição Diária da Escala (Serviços, SUPRA e Descanso)")
+    l_dist = (48, 52, 36, 52, 44, 44)
+    cabecalho_tabela(["Dia da Semana", "Serviços (Ant -> Nov)", "Dif.", "SUPRA (Ant -> Nov)", "Descanso", "Total OS"], l_dist)
+    for d_row in dist_rows:
+        pdf.set_fill_color(*d_row[6])
+        pdf.set_font("Helvetica", "B", 8.5)
+        for idx_c in range(6):
+            pdf.cell(l_dist[idx_c], 7, limpar_latin1(d_row[idx_c]), border=1, align=("L" if idx_c == 0 else "C"), fill=True)
+        pdf.ln()
+
+    pdf.ln(5)
+    titulo_sec("6. Cômputo a cada 12 Semanas")
+    l_sem = (45, 55, 58, 58, 60)
+    cabecalho_tabela(["Bloco", "Semanas", "Horas Anterior", "Horas Nova", "Diferença (12 Sem.)"], l_sem)
+    for s_row in sem_rows:
+        pdf.set_fill_color(255, 235, 156)
+        pdf.set_font("Helvetica", "B", 8.5)
+        for idx_c in range(5):
+            pdf.cell(l_sem[idx_c], 7, limpar_latin1(s_row[idx_c]), border=1, align="C", fill=True)
+        pdf.ln()
+
+    return bytes(pdf.output())
+
+def gerar_pdf_impacto_simulacao(linhas_comp, resumo_infracoes, titulo_esc="COBR20"):
+    pdf = PDFComAssinatura(titulo_escala=titulo_esc, orientation="L", unit="mm", format="A4")
+    pdf.alias_nb_pages()
+    pdf.set_auto_page_break(auto=True, margin=14)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(31, 78, 120)
+    pdf.cell(0, 8, limpar_latin1(f"Relatório de Impacto de Simulação - Escala {titulo_esc}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 7, limpar_latin1("1. Auditoria de Regras (Repouso Sede 14h | Fora 9h | TR 45m | PNT 6h-9h)"), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(20, 20, 20)
+    for inf in resumo_infracoes:
+        pdf.cell(0, 6, limpar_latin1(f"- {inf}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(31, 78, 120)
+    pdf.cell(0, 7, limpar_latin1("2. Comparação das OS Editadas (Original vs. Simulação)"), new_x="LMARGIN", new_y="NEXT")
+    l_sim = (20, 128, 128)
+    pdf.set_fill_color(31, 78, 120)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 8.5)
+    for c, w in zip(["OS", "Original", "Editada (Simulação)"], l_sim):
+        pdf.cell(w, 7, limpar_latin1(c), border=1, align="C", fill=True)
+    pdf.ln()
+    pdf.set_text_color(20, 20, 20)
+    for os_s, orig_t, edit_t in linhas_comp:
+        pdf.set_fill_color(198, 239, 206)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(l_sim[0], 10, limpar_latin1(os_s), border=1, align="C", fill=True)
+        pdf.set_font("Helvetica", "", 7.5)
+        pdf.cell(l_sim[1], 10, limpar_latin1(orig_t[:85]), border=1, fill=True)
+        pdf.set_font("Helvetica", "B", 7.5)
+        pdf.cell(l_sim[2], 10, limpar_latin1(edit_t[:85]), border=1, fill=True)
+        pdf.ln()
+    return bytes(pdf.output())
+
+def converter_pdf_para_excel_validado(uploaded_pdf):
+    bytes_data = uploaded_pdf.read()
+    todas_linhas = []
+    data_vigor, num_alt, cod_esc = "22/11/2026", "ALTERAÇÃO", "ORV_CP"
+    with pdfplumber.open(io.BytesIO(bytes_data)) as pdf:
+        txt_p1 = pdf.pages[0].extract_text() or ""
+        m_dt = re.search(r'\b(\d{2}/\d{2}/\d{4})\b', txt_p1)
+        if m_dt: data_vigor = m_dt.group(1)
+        m_al = re.search(r'(\d+ª\s+ALTERAÇÃO)', txt_p1)
+        if m_al: num_alt = m_al.group(1)
+        m_es = re.search(r'\b([A-Z]{3}R\d{2})\b', txt_p1)
+        if m_es: cod_esc = m_es.group(1)
+        for pagina in pdf.pages:
+            for tabela in pagina.extract_tables(): todas_linhas.extend(tabela)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = cod_esc
+    verde_cp = PatternFill("solid", fgColor="1B4F3E")
+    fonte_branca = Font(name="Calibri", size=9, bold=True, color="FFFFFF")
+    fonte_bold = Font(name="Calibri", size=9, bold=True, color="000000")
+    fonte_norm = Font(name="Calibri", size=9, bold=False, color="000000")
+    borda_fina = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
+    centro = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    esq = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    ws.append(["EM VIGOR DESDE", "CATEGORIA", "", f"{num_alt} EM VIGOR A PARTIR DE:", "", "ESCALA", "DEPÓSITO DE REVISÃO", "", "", "", ""])
+    ws.append(["31/05/2020", "Operador de Revisão e Venda", "", data_vigor, "", cod_esc, "NACIONAL CP", "", "", "", ""])
+    ws.append([""] * 11)
+    ws.append(["OS", "Dias da Semana", "Apresentação", "", "Designação dos Serviços", "Ret. Prevista", "", "PNT", "REP", "", "Obs"])
+    ws.append(["", "", "Local", "Hora", "", "Local", "Hora", "", "S", "F", ""])
+
+    for r_idx in (1, 4, 5):
+        for c_idx in range(1, 12):
+            cell = ws.cell(row=r_idx, column=c_idx)
+            cell.fill, cell.font, cell.alignment, cell.border = verde_cp, fonte_branca, centro, borda_fina
+    for c_idx in range(1, 12):
+        cell = ws.cell(row=2, column=c_idx)
+        cell.font, cell.alignment, cell.border = fonte_bold, centro, borda_fina
+
+    for rng in ("C1:E1", "C2:E2", "G1:K1", "G2:K2", "A4:A5", "B4:B5", "C4:D4", "E4:E5", "F4:G4", "H4:H5", "I4:J4", "K4:K5"):
+        ws.merge_cells(rng)
+
+    lixo = ("EM VIGOR", "ALTERAÇÃO", "CATEGORIA", "DEPÓSITO", "Planeamento", "Versão electrónica", "F.500.02", "Revisão e Venda", "Local", "Hora", "Dias da Semana")
+    os_encontradas, os_atual, inicio_os_row = set(), None, None
+
+    for r in todas_linhas:
+        r = [re.sub(r'\s+', ' ', str(c)).strip() if c is not None else "" for c in r]
+        if not any(r) or any(p in " ".join(r) for p in lixo) or len(r) < 10: continue
+        linha_11 = (r + [""] * 11)[:11]
+        c_os = linha_11[0]
+        if c_os.isdigit() and 1 <= int(c_os) <= 365:
+            if os_atual and inicio_os_row and ws.max_row > inicio_os_row:
+                ws.merge_cells(start_row=inicio_os_row, start_column=1, end_row=ws.max_row, end_column=1)
+            os_atual = int(c_os)
 def aplicar_visual_cp(img_path="alfa-pendular-wext3_856.jpg"):
     bg_css = ""
     try:
