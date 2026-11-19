@@ -719,7 +719,7 @@ with aba_edit:
             ext = extrair_horarios_de_pdf_cp(pdf_hor)
             st.session_state["base_comboios"].update(ext)
             st.success(f"Extraídos {len(ext)} comboios do PDF!")
-                arq_sim = st.file_uploader("Carrega a Escala Base para Editar (.xlsx ou .pdf)", type=["xlsx", "pdf"], key="sim")
+            arq_sim = st.file_uploader("Carrega a Escala Base para Editar (.xlsx ou .pdf)", type=["xlsx", "pdf"], key="sim")
     if arq_sim:
     if arq_sim:
         d_sim, meta_sim = ler_ficheiro_carregado(arq_sim)
