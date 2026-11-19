@@ -38,7 +38,6 @@ def carregar_base_comboios():
     return {}
 
 def extrair_horarios_de_pdf_cp(uploaded_pdf):
-    """Extrai comboios e horários (HH:MM) a partir de um PDF de horários da CP."""
     novos = {}
     with pdfplumber.open(io.BytesIO(uploaded_pdf.read())) as pdf:
         for pag in pdf.pages:
@@ -49,7 +48,7 @@ def extrair_horarios_de_pdf_cp(uploaded_pdf):
                 if m_cb and len(horas) >= 2:
                     cb = m_cb.group(1)
                     if cb not in novos:
-                        novos[cb] = {"Origem": "EST1", "Partida": horas, "Destino": "EST2", "Chegada": horas[-1]}
+                        novos[cb] = {"Origem": "EST1", "Partida": horas[0], "Destino": "EST2", "Chegada": horas[-1]}
     return novos
 
 def processar_linhas_brutas(linhas):
@@ -100,7 +99,7 @@ def ler_ficheiro_carregado(uploaded_file):
     if nome.endswith(".pdf"):
         todas_linhas = []
         with pdfplumber.open(io.BytesIO(bytes_data)) as pdf:
-            txt1 = pdf.pages.extract_text() or ""
+            txt1 = pdf.pages[0].extract_text() or ""
             m_esc = re.search(r'\b([A-Z]{3}R\d{2})\b', txt1)
             if m_esc:
                 meta["Escala"] = m_esc.group(1)
@@ -132,7 +131,11 @@ def expandir(regra):
         if not m: continue
         dt, tt = m.groups()
         tipos = list(tt) if tt else ['N','V','F','S']
-        dias = range(int(dt.split('..')), int(dt.split('..')) + 1) if '..' in dt else [int(dt)]
+        if '..' in dt:
+            partes = dt.split('..')
+            dias = range(int(partes[0]), int(partes[1]) + 1)
+        else:
+            dias = [int(dt)]
         for d in dias:
             for t in tipos: pares.add((d, t))
     return pares
@@ -193,7 +196,6 @@ def limpar_latin1(txt):
     return str(txt).replace("•", "-").replace("→", "->").encode("latin-1", "replace").decode("latin-1")
 
 def auditar_linha_editada(serv_txt, base_cb, sede="COB"):
-    """Preenche horários a partir do comboios.csv e valida TR (>=45m) e PNT."""
     cbs = re.findall(r'\b\d{3,5}\b', re.sub(r'\(.*?\)', '', serv_txt))
     cbs_conhecidos = [c for c in cbs if c in base_cb]
     cbs_desconhecidos = [c for c in cbs if c not in base_cb]
@@ -203,11 +205,10 @@ def auditar_linha_editada(serv_txt, base_cb, sede="COB"):
 
     loc_apr, hora_apr, loc_ret, hora_ret, pnt_str = sede, "", sede, "", ""
     if cbs_conhecidos:
-        primeiro, ultimo = base_cb[cbs_conhecidos], base_cb[cbs_conhecidos[-1]]
+        primeiro, ultimo = base_cb[cbs_conhecidos[0]], base_cb[cbs_conhecidos[-1]]
         loc_apr, loc_ret = primeiro["Origem"], ultimo["Destino"]
         m_p, m_c = hora_para_min(primeiro["Partida"]), hora_para_min(ultimo["Chegada"])
         if m_p is not None and m_c is not None:
-            # 10 min preparação antes e 10 min após chegada
             ini_j = (m_p - 10) % (24 * 60)
             fim_j = (m_c + 10) % (24 * 60)
             hora_apr, hora_ret = min_para_hora(ini_j), min_para_hora(fim_j)
@@ -218,15 +219,14 @@ def auditar_linha_editada(serv_txt, base_cb, sede="COB"):
             elif dur > 9 * 60:
                 alertas.append(f"🔴 PNT acima do máximo (09h00): {fmt_hm(dur)}")
 
-    # Auditoria da Tomada de Refeição (TR) >= 45 min
     if "(TR)" in serv_txt.upper():
         partes = re.split(r'\(TR\)', serv_txt, flags=re.IGNORECASE)
         if len(partes) >= 2:
-            c_antes = re.findall(r'\b\d{3,5}\b', partes)
-            c_depois = re.findall(r'\b\d{3,5}\b', partes)
-            if c_antes and c_depois and c_antes[-1] in base_cb and c_depois in base_cb:
+            c_antes = re.findall(r'\b\d{3,5}\b', partes[0])
+            c_depois = re.findall(r'\b\d{3,5}\b', partes[1])
+            if c_antes and c_depois and c_antes[-1] in base_cb and c_depois[0] in base_cb:
                 h_cheg_antes = hora_para_min(base_cb[c_antes[-1]]["Chegada"])
-                h_part_depois = hora_para_min(base_cb[c_depois]["Partida"])
+                h_part_depois = hora_para_min(base_cb[c_depois[0]]["Partida"])
                 if h_cheg_antes is not None and h_part_depois is not None:
                     tr_mins = (h_part_depois - h_cheg_antes) if h_part_depois >= h_cheg_antes else ((24 * 60 - h_cheg_antes) + h_part_depois)
                     if tr_mins < 45:
@@ -252,6 +252,7 @@ class PDFComAssinatura(FPDF):
         self.set_font("Helvetica", "I", 8.5)
         self.set_text_color(110, 110, 110)
         self.cell(0, 6, limpar_latin1(f"Escala {self.titulo_escala}  |  by Luís Maia  |  Página {self.page_no()}/{{nb}}"), align="C")
+
 def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, dist_rows, sem_rows, titulo_esc="COBR20", so_os=False):
     pdf = PDFComAssinatura(titulo_escala=titulo_esc, orientation="L", unit="mm", format="A4")
     pdf.alias_nb_pages()
@@ -276,7 +277,7 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
     titulo_sec(f"Resumo de OS Alteradas - Escala {titulo_esc}" if so_os else f"Comparação Completa - Escala {titulo_esc}")
     pdf.ln(1)
     titulo_sec("1. Alterações por Ordem de Serviço (OS)")
-    l_os = (20, 46, 105, 105)
+    l_os = [20, 46, 105, 105]
     cabecalho_tabela(["OS", "Tipo de Alteração", "Escala Anterior", "Escala Nova (Negrito)"], l_os)
 
     for os_str, tp, ta, tn, cor_rgb in lista_os_alt:
@@ -288,14 +289,14 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
         y_ini = pdf.get_y()
         pdf.set_fill_color(*cor_rgb)
         pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(l_os, alt_linha, limpar_latin1(os_str), border=1, align="C", fill=True)
-        pdf.cell(l_os, alt_linha, limpar_latin1(tp), border=1, align="C", fill=True)
+        pdf.cell(l_os[0], alt_linha, limpar_latin1(os_str), border=1, align="C", fill=True)
+        pdf.cell(l_os[1], alt_linha, limpar_latin1(tp), border=1, align="C", fill=True)
         x_ta = pdf.get_x()
         pdf.set_font("Helvetica", "", 7.5)
-        pdf.multi_cell(l_os, alt_linha / linhas_max, limpar_latin1(ta), border=1, fill=True)
-        pdf.set_xy(x_ta + l_os, y_ini)
+        pdf.multi_cell(l_os[2], alt_linha / linhas_max, limpar_latin1(ta), border=1, fill=True)
+        pdf.set_xy(x_ta + l_os[2], y_ini)
         pdf.set_font("Helvetica", "B", 7.5)
-        pdf.multi_cell(l_os, alt_linha / linhas_max, limpar_latin1(tn), border=1, fill=True)
+        pdf.multi_cell(l_os[3], alt_linha / linhas_max, limpar_latin1(tn), border=1, fill=True)
         pdf.set_y(y_ini + alt_linha)
 
     if so_os:
@@ -303,7 +304,7 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
 
     pdf.add_page()
     titulo_sec("2. Mobilidade de Comboios entre OS")
-    l_cb = (24, 46, 50, 50, 53, 53)
+    l_cb = [24, 46, 50, 50, 53, 53]
     cabecalho_tabela(["Comboio", "Movimento", "Saiu das OS", "Entrou nas OS", "OS Antes", "OS Agora"], l_cb)
     for cb, mv, saiu, entrou, oa, on, cor_rgb in lista_cb_mov:
         pdf.set_fill_color(*cor_rgb)
@@ -314,7 +315,7 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
 
     pdf.ln(5)
     titulo_sec("3. Alterações nos Repousos Fora da Sede (REP F)")
-    l_rep = (22, 54, 100, 100)
+    l_rep = [22, 54, 100, 100]
     cabecalho_tabela(["OS", "Situação Repouso", "Repousos Antes", "Repousos Agora"], l_rep)
     for os_s, st_r, ra, rn, cor_rgb in lista_rep_alt:
         pdf.set_fill_color(*cor_rgb)
@@ -325,129 +326,171 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
 
     pdf.ln(5)
     titulo_sec("4. Balanço Final: Ganhos vs Perdas")
-    l_bal = (115, 45, 116)
+    l_bal = [115, 45, 116]
     cabecalho_tabela(["Indicador", "Antes -> Agora", "Impacto / Saldo"], l_bal)
     for ind, qtd, obs, cor_rgb in balanco_rows:
         pdf.set_fill_color(*cor_rgb)
-        pdf.set_font("Helvetica", "B", 8.5)
-        pdf.cell(l_bal, 7, limpar_latin1(ind), border=1, fill=True)
-        pdf.cell(l_bal, 7, limpar_latin1(qtd), border=1, align="C", fill=True)
-        pdf.cell(l_bal, 7, limpar_latin1(obs), border=1, fill=True)
-        pdf.ln()
+def aplicar_visual_cp(img_path="alfa-pendular-wext3_856.jpg"):
+    bg_css = ""
+    try:
+        with open(img_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        bg_css = f"background-image: linear-gradient(120deg, rgba(0, 55, 30, 0.80), rgba(15, 23, 42, 0.70)), url('data:image/jpeg;base64,{b64}');"
+    except Exception:
+        bg_css = "background: linear-gradient(120deg, #006837, #0F172A);"
 
-    pdf.add_page()
-    titulo_sec("5. Distribuição Diária da Escala (Serviços, SUPRA e Descanso)")
-    l_dist = (48, 52, 36, 52, 44, 44)
-    cabecalho_tabela(["Dia da Semana", "Serviços (Ant -> Nov)", "Dif.", "SUPRA (Ant -> Nov)", "Descanso", "Total OS"], l_dist)
-    for d_row in dist_rows:
-        pdf.set_fill_color(*d_row)
-        pdf.set_font("Helvetica", "B", 8.5)
-        for idx_c in range(6):
-            pdf.cell(l_dist[idx_c], 7, limpar_latin1(d_row[idx_c]), border=1, align=("L" if idx_c == 0 else "C"), fill=True)
-        pdf.ln()
+    st.markdown(f"""
+    <style>
+        .hero-cp {{
+            {bg_css}
+            background-size: cover;
+            background-position: center 65%;
+            padding: 28px 24px;
+            border-radius: 16px;
+            color: white;
+            margin-bottom: 18px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        }}
+        .hero-cp h1 {{ color: #FFFFFF !important; margin: 0; font-size: 1.9rem; }}
+        .hero-cp p {{ color: #E2E8F0 !important; margin: 6px 0 0 0; font-size: 0.95rem; }}
+        div[data-testid="stMetric"] {{
+            background-color: #FFFFFF;
+            border-left: 5px solid #006837;
+            padding: 12px 14px;
+            border-radius: 10px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+        }}
+    </style>
+    <div class="hero-cp">
+        <h1>Escalas ORV CP</h1>
+        <p>Gestão, Comparação e Simulação Nacional de Escalas &bull; <b>by Luís Maia</b></p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    pdf.ln(5)
-    titulo_sec("6. Cômputo a cada 12 Semanas")
-    l_sem = (45, 55, 58, 58, 60)
-    cabecalho_tabela(["Bloco", "Semanas", "Horas Anterior", "Horas Nova", "Diferença (12 Sem.)"], l_sem)
-    for s_row in sem_rows:
-        pdf.set_fill_color(255, 235, 156)
-        pdf.set_font("Helvetica", "B", 8.5)
-        for idx_c in range(5):
-            pdf.cell(l_sem[idx_c], 7, limpar_latin1(s_row[idx_c]), border=1, align="C", fill=True)
-        pdf.ln()
+def verificar_acesso():
+    if st.session_state.get("autenticado"):
+        return True
+    st.markdown("### 🔒 Acesso Reservado")
+    senha_digitada = st.text_input("Insere a palavra-passe de acesso:", type="password")
+    if st.button("Entrar", type="primary"):
+        senha_correta = st.secrets.get("SENHA_APP", "COBR20")
+        if senha_digitada == senha_correta:
+            st.session_state["autenticado"] = True
+            st.rerun()
+        else:
+            st.error("❌ Palavra-passe incorreta.")
+    return False
 
-    return bytes(pdf.output())
+def processar_comparacao_mobile(d_ant, d_nov, data_ini_str, titulo_esc="COBR20"):
+    max_os = max(obter_total_os(d_ant), obter_total_os(d_nov))
+    sems_ant = calcular_semanas_detalhado(d_ant, data_ini_str, max_os)
+    sems_nov = calcular_semanas_detalhado(d_nov, data_ini_str, max_os)
+    c_ant, c_nov, os_alt, os_gan, os_sup, rep_alt = {}, {}, 0, 0, 0, []
+    lista_os_alt, lista_cb_mov, lista_rep_alt = [], [], []
 
-def gerar_pdf_impacto_simulacao(linhas_comp, resumo_infracoes, titulo_esc="COBR20"):
-    pdf = PDFComAssinatura(titulo_escala=titulo_esc, orientation="L", unit="mm", format="A4")
-    pdf.alias_nb_pages()
-    pdf.set_auto_page_break(auto=True, margin=14)
-    pdf.add_page()
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.set_text_color(31, 78, 120)
-    pdf.cell(0, 8, limpar_latin1(f"Relatório de Impacto de Simulação - Escala {titulo_esc}"), new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(2)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(0, 7, limpar_latin1("1. Auditoria de Regras (Repouso Sede 14h | Fora 9h | TR 45m | PNT 6h-9h)"), new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(20, 20, 20)
-    for inf in resumo_infracoes:
-        pdf.cell(0, 6, limpar_latin1(f"- {inf}"), new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(3)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_text_color(31, 78, 120)
-    pdf.cell(0, 7, limpar_latin1("2. Comparação das OS Editadas (Original vs. Simulação)"), new_x="LMARGIN", new_y="NEXT")
-    l_sim = (20, 128, 128)
-    pdf.set_fill_color(31, 78, 120)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 8.5)
-    for c, w in zip(["OS", "Original", "Editada (Simulação)"], l_sim):
-        pdf.cell(w, 7, limpar_latin1(c), border=1, align="C", fill=True)
-    pdf.ln()
-    pdf.set_text_color(20, 20, 20)
-    for os_s, orig_t, edit_t in linhas_comp:
-        pdf.set_fill_color(198, 239, 206)
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(l_sim, 10, limpar_latin1(os_s), border=1, align="C", fill=True)
-        pdf.set_font("Helvetica", "", 7.5)
-        pdf.cell(l_sim, 10, limpar_latin1(orig_t[:85]), border=1, fill=True)
-        pdf.set_font("Helvetica", "B", 7.5)
-        pdf.cell(l_sim, 10, limpar_latin1(edit_t[:85]), border=1, fill=True)
-        pdf.ln()
-    return bytes(pdf.output())
+    for os_n in range(1, max_os + 1):
+        sa, sn = [x for x in d_ant if x["OS"] == os_n], [x for x in d_nov if x["OS"] == os_n]
+        ta = "\n".join(f"- [{x['Dias']}] {x['Serv']} ({x['PNT'][:5]}){' [REP FORA: '+x['LocalRet']+']' if x['RepFora'] else ''}" for x in sa if x["Dias"] or x["Serv"])
+        tn = "\n".join(f"- [{x['Dias']}] {x['Serv']} ({x['PNT'][:5]}){' [REP FORA: '+x['LocalRet']+']' if x['RepFora'] else ''}" for x in sn if x["Dias"] or x["Serv"])
+        rep_a = sorted(set(f"{x['Dias_Efet']} ({x['LocalRet']})" for x in sa if x["RepFora"]))
+        rep_n = sorted(set(f"{x['Dias_Efet']} ({x['LocalRet']})" for x in sn if x["RepFora"]))
+        if rep_a != rep_n: rep_alt.append((os_n, rep_a, rep_n))
+        for x in sa:
+            for cb in comboios(x["Serv"]): c_ant.setdefault(cb, set()).add(os_n)
+        for x in sn:
+            for cb in comboios(x["Serv"]): c_nov.setdefault(cb, set()).add(os_n)
+        if ta != tn:
+            os_alt += 1
+            if "SUPRA" not in ta and "SUPRA" in tn: tp, cor, os_sup = "PASSOU A SUPRA", (255, 235, 156), os_sup + 1
+            elif "SUPRA" in ta and "SUPRA" not in tn: tp, cor, os_gan = "GANHOU SERVIÇO", (198, 239, 206), os_gan + 1
+            else: tp, cor = "AJUSTE HORÁRIO / COMBOIO", (217, 225, 242)
+            lista_os_alt.append((f"OS {os_n:03d}", tp, ta, tn, cor))
 
-def converter_pdf_para_excel_validado(uploaded_pdf):
-    bytes_data = uploaded_pdf.read()
-    todas_linhas = []
-    data_vigor, num_alt, cod_esc = "22/11/2026", "ALTERAÇÃO", "ORV_CP"
-    with pdfplumber.open(io.BytesIO(bytes_data)) as pdf:
-        txt_p1 = pdf.pages.extract_text() or ""
-        m_dt = re.search(r'\b(\d{2}/\d{2}/\d{4})\b', txt_p1)
-        if m_dt: data_vigor = m_dt.group(1)
-        m_al = re.search(r'(\d+ª\s+ALTERAÇÃO)', txt_p1)
-        if m_al: num_alt = m_al.group(1)
-        m_es = re.search(r'\b([A-Z]{3}R\d{2})\b', txt_p1)
-        if m_es: cod_esc = m_es.group(1)
-        for pagina in pdf.pages:
-            for tabela in pagina.extract_tables(): todas_linhas.extend(tabela)
+    cb_nov, cb_sup, cb_trf = 0, 0, 0
+    for cb in sorted(set(c_ant) | set(c_nov), key=int):
+        oa, on = sorted(c_ant.get(cb, set())), sorted(c_nov.get(cb, set()))
+        if oa != on:
+            saiu = ", ".join(f"OS {x}" for x in sorted(set(oa)-set(on))) or "-"
+            entrou = ", ".join(f"OS {x}" for x in sorted(set(on)-set(oa))) or "-"
+            if not oa: mv, cor, cb_nov = "NOVO NA ESCALA", (198, 239, 206), cb_nov + 1
+            elif not on: mv, cor, cb_sup = "SUPRIMIDO", (255, 199, 206), cb_sup + 1
+            else: mv, cor, cb_trf = "TRANSFERIDO", (255, 235, 156), cb_trf + 1
+            lista_cb_mov.append((cb, mv, saiu, entrou, ", ".join(f"OS {x}" for x in oa) or "-", ", ".join(f"OS {x}" for x in on) or "-", cor))
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = cod_esc
-    verde_cp = PatternFill("solid", fgColor="1B4F3E")
-    fonte_branca = Font(name="Calibri", size=9, bold=True, color="FFFFFF")
-    fonte_bold = Font(name="Calibri", size=9, bold=True, color="000000")
-    fonte_norm = Font(name="Calibri", size=9, bold=False, color="000000")
-    borda_fina = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
-    centro = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    esq = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    for os_n, ra, rn in rep_alt:
+        if len(rn) > len(ra): st_r, cor = "GANHOU REPOUSO", (198, 239, 206)
+        elif len(rn) < len(ra): st_r, cor = "PERDEU REPOUSO", (255, 199, 206)
+        else: st_r, cor = "ALTEROU REP FORA", (217, 225, 242)
+        lista_rep_alt.append((f"OS {os_n:03d}", st_r, ", ".join(ra) if ra else "Sem rep. fora", ", ".join(rn) if rn else "Sem rep. fora", cor))
 
-    ws.append(["EM VIGOR DESDE", "CATEGORIA", "", f"{num_alt} EM VIGOR A PARTIR DE:", "", "ESCALA", "DEPÓSITO DE REVISÃO", "", "", "", ""])
-    ws.append(["31/05/2020", "Operador de Revisão e Venda", "", data_vigor, "", cod_esc, "NACIONAL CP", "", "", "", ""])
-    ws.append([""] * 11)
-    ws.append(["OS", "Dias da Semana", "Apresentação", "", "Designação dos Serviços", "Ret. Prevista", "", "PNT", "REP", "", "Obs"])
-    ws.append(["", "", "Local", "Hora", "", "Local", "Hora", "", "S", "F", ""])
+    m_ant, m_nov = sum(sems_ant) / float(max_os), sum(sems_nov) / float(max_os)
+    rep_tot_ant, rep_tot_nov = contar_repousos_escala(d_ant, max_os), contar_repousos_escala(d_nov, max_os)
+    dif_rep, dm, scb, sos = rep_tot_nov - rep_tot_ant, m_nov - m_ant, len(c_nov) - len(c_ant), os_gan - os_sup
+    txt_rep = f"GANHOU {dif_rep} repouso(s) (+{dif_rep})" if dif_rep > 0 else (f"PERDEU {abs(dif_rep)} repouso(s) ({dif_rep})" if dif_rep < 0 else "Manteve repousos (0)")
+    cor_rep = (198, 239, 206) if dif_rep > 0 else ((255, 199, 206) if dif_rep < 0 else (217, 225, 242))
 
-    for r_idx in (1, 4, 5):
-        for c_idx in range(1, 12):
-            cell = ws.cell(row=r_idx, column=c_idx)
-            cell.fill, cell.font, cell.alignment, cell.border = verde_cp, fonte_branca, centro, borda_fina
-    for c_idx in range(1, 12):
-        cell = ws.cell(row=2, column=c_idx)
-        cell.font, cell.alignment, cell.border = fonte_bold, centro, borda_fina
+    balanco_rows = [
+        ("Total de Repousos Fora da Sede (REP F)", f"{rep_tot_ant} -> {rep_tot_nov}", txt_rep, cor_rep),
+        ("Carga Horária Média Semanal", f"{fmt_hm(m_ant)} -> {fmt_hm(m_nov)}", f"Diferença semanal: {fmt_hm(dm, True)}", (217, 225, 242)),
+        ("Comboios distintos na Escala", f"{len(c_ant)} -> {len(c_nov)}", f"Novos: +{cb_nov} | Suprimidos: -{cb_sup} | Transf.: {cb_trf}", (245, 245, 245)),
+        ("SALDO LÍQUIDO DE COMBOIOS", f"{scb:+d}", "Ganho/Perda líquida de circulações", (198, 239, 206) if scb>0 else ((255, 199, 206) if scb<0 else (217, 225, 242))),
+        ("Total de OS alteradas", f"{os_alt} / {max_os}", f"Ganharam serviço: +{os_gan} | Passaram a SUPRA: -{os_sup}", (217, 225, 242)),
+        ("SALDO LÍQUIDO DE OS COM SERVIÇO", f"{sos:+d}", "Balanço entre OS ganhas e SUPRA", (198, 239, 206) if sos>0 else ((255, 199, 206) if sos<0 else (217, 225, 242))),
+    ]
 
-    for rng in ("C1:E1", "C2:E2", "G1:K1", "G2:K2", "A4:A5", "B4:B5", "C4:D4", "E4:E5", "F4:G4", "H4:H5", "I4:J4", "K4:K5"):
-        ws.merge_cells(rng)
+    ind_ant, ind_nov = calcular_indicadores_dia(d_ant, max_os), calcular_indicadores_dia(d_nov, max_os)
+    nomes_dias = ("Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado")
+    dist_rows = []
+    for d_idx in range(1, 8):
+        s_a, s_n = ind_ant[d_idx]["SERVICOS"], ind_nov[d_idx]["SERVICOS"]
+        u_a, u_n = ind_ant[d_idx]["SUPRA"], ind_nov[d_idx]["SUPRA"]
+        desc_n, dif_s = ind_nov[d_idx]["DESCANSO"], s_n - s_a
+        cor_l = (198, 239, 206) if dif_s > 0 else ((255, 199, 206) if dif_s < 0 else (248, 248, 248))
+        dist_rows.append((nomes_dias[d_idx-1], f"{s_a} -> {s_n}", f"{dif_s:+d}", f"{u_a} -> {u_n}", str(desc_n), str(s_n+u_n+desc_n), cor_l))
 
-    lixo = ("EM VIGOR", "ALTERAÇÃO", "CATEGORIA", "DEPÓSITO", "Planeamento", "Versão electrónica", "F.500.02", "Revisão e Venda", "Local", "Hora", "Dias da Semana")
-    os_encontradas, os_atual, inicio_os_row = set(), None, None
+    num_blocos = max(1, max_os // 12)
+    sem_rows = []
+    for b_idx in range(num_blocos):
+        ini_s, fim_s = b_idx * 12, (b_idx + 1) * 12
+        sa12, sn12 = sum(sems_ant[ini_s:fim_s]), sum(sems_nov[ini_s:fim_s])
+        sem_rows.append((f"BLOCO {b_idx+1}", f"Sem {ini_s+1} a {fim_s}", fmt_hm(sa12), fmt_hm(sn12), fmt_hm(sn12 - sa12, True)))
 
-    for r in todas_linhas:
-        r = [re.sub(r'\s+', ' ', str(c)).strip() if c is not None else "" for c in r]
-        if not any(r) or any(p in " ".join(r) for p in lixo) or len(r) < 10: continue
-        linha_11 = (r + [""] * 11)[:11]
-        c_os = linha_11
-        if c_os.isdigit() and 1 <= int(c_os) <= 365:
-            if os_atual and inicio_os_row and ws.max_row > inicio_os_row:
-                ws.merge_cells(start_row=inicio_os_row, start_column=1, end_row=ws.max_row, end_column=1)
+    pdf_completo = gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, dist_rows, sem_rows, titulo_esc=titulo_esc, so_os=False)
+    pdf_so_os = gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, dist_rows, sem_rows, titulo_esc=titulo_esc, so_os=True)
+    resumo = {"rep_ant": rep_tot_ant, "rep_nov": rep_tot_nov, "dif_rep": dif_rep, "scb": scb, "sos": sos, "h_ant": fmt_hm(m_ant), "h_nov": fmt_hm(m_nov)}
+    return pdf_completo, pdf_so_os, resumo
+
+aplicar_visual_cp("alfa-pendular-wext3_856.jpg")
+if not verificar_acesso():
+    st.stop()
+
+if "base_comboios" not in st.session_state:
+    st.session_state["base_comboios"] = carregar_base_comboios()
+
+aba_comp, aba_edit, aba_conv = st.tabs(["📊 Comparar Escalas", "✏️ Editor & Simulador de OS", "🔄 Converter PDF → Excel"])
+
+with aba_comp:
+    arq_ant = st.file_uploader("1. Escala Anterior (Excel ou PDF)", type=["xlsx", "pdf"], key="ant")
+    arq_nov = st.file_uploader("2. Escala Nova (Excel ou PDF)", type=["xlsx", "pdf"], key="nov")
+    data_ini = st.date_input("Início da Escala (Dom)", value=datetime(2026, 11, 22))
+
+    if arq_nov:
+        d_preview, meta_nov = ler_ficheiro_carregado(arq_nov)
+        arq_nov.seek(0)
+        with st.expander(f"👁️ Visualizar Escala Carregada ({meta_nov['Escala']} — {obter_total_os(d_preview)} OS)", expanded=False):
+            filtro_os = st.text_input("Filtrar por OS ou Comboio:", placeholder="Ex: 117 ou 4670")
+            df_prev = pd.DataFrame(d_preview)[["OS", "Dias", "LocalApr", "HoraApr", "Serv", "LocalRet", "HoraRet", "PNT", "RepFora"]]
+            if filtro_os.strip():
+                df_prev = df_prev[df_prev["OS"].astype(str).str.contains(filtro_os.strip()) | df_prev["Serv"].str.contains(filtro_os.strip(), case=False)]
+            st.dataframe(df_prev, use_container_width=True, hide_index=True)
+
+    if arq_ant and arq_nov:
+        if st.button("🔍 Comparar Escalas", type="primary", use_container_width=True):
+            with st.spinner("A processar escalas..."):
+                d_a, _ = ler_ficheiro_carregado(arq_ant)
+                d_n, meta_n = ler_ficheiro_carregado(arq_nov)
+                p_comp, p_os, res = processar_comparacao_mobile(d_a, d_n, data_ini.strftime("%Y-%m-%d"), titulo_esc=meta_n["Escala"])
+                st.session_state["mob_res"] = (p_comp, p_os, res, meta_n["Escala"])
+
+    if "mob_res" in st.session_state:
+        p_comp, p_os, res, cod_esc_res = st.session_state["mob_res"]
