@@ -93,17 +93,36 @@ def processar_linhas_brutas(linhas):
                 })
     return dados
 
+DEPOSITOS_CP = {
+    "COB": "COIMBRA B",
+    "PCA": "PORTO CAMPANHÃ",
+    "ENT": "ENTRONCAMENTO",
+    "LSA": "LISBOA SANTA APOLÓNIA",
+    "LRO": "LISBOA ROSSIO",
+    "FAR": "FARO",
+    "REG": "RÉGUA",
+    
+}
+
+def identificar_deposito(texto, sede_sigla):
+    t_up = texto.upper()
+    for sigla, nome_cid in DEPOSITOS_CP.items():
+        if nome_cid in t_up:
+            return nome_cid
+    return DEPOSITOS_CP.get(sede_sigla, sede_sigla)
+
 def ler_ficheiro_carregado(uploaded_file):
     nome, bytes_data = uploaded_file.name.lower(), uploaded_file.read()
-    meta = {"Escala": "ORV CP", "Deposito": "Nacional", "Sede": "COB"}
+    meta = {"Escala": "ORV CP", "Deposito": "NACIONAL", "Sede": "COB"}
     if nome.endswith(".pdf"):
         todas_linhas = []
         with pdfplumber.open(io.BytesIO(bytes_data)) as pdf:
-            txt1 = pdf.pages[0].extract_text() or ""
+            txt1 = pdf.pages.extract_text() or ""
             m_esc = re.search(r'\b([A-Z]{3}R\d{2})\b', txt1)
             if m_esc:
                 meta["Escala"] = m_esc.group(1)
                 meta["Sede"] = m_esc.group(1)[:3]
+            meta["Deposito"] = identificar_deposito(txt1, meta["Sede"])
             for pagina in pdf.pages:
                 for tabela in pagina.extract_tables(): todas_linhas.extend(tabela)
         return processar_linhas_brutas(todas_linhas), meta
@@ -115,9 +134,11 @@ def ler_ficheiro_carregado(uploaded_file):
         if m_esc:
             meta["Escala"] = m_esc.group(1)
             meta["Sede"] = m_esc.group(1)[:3]
+        meta["Deposito"] = identificar_deposito(txt_topo, meta["Sede"])
         if any(any("Dias da Semana" in c for c in l) for l in linhas):
             return processar_linhas_brutas(linhas), meta
     return [], meta
+
 def obter_total_os(dados):
     return max([x["OS"] for x in dados], default=120)
 
@@ -600,7 +621,7 @@ with aba_comp:
     if arq_nov:
         d_preview, meta_nov = ler_ficheiro_carregado(arq_nov)
         arq_nov.seek(0)
-        with st.expander(f"👁️ Visualizar Escala Carregada ({meta_nov['Escala']} — {obter_total_os(d_preview)} OS)", expanded=False):
+        with st.expander(f"👁️ Visualizar Escala: {meta_nov['Deposito']} ({meta_nov['Escala']} — {obter_total_os(d_preview)} OS)", expanded=True):
             filtro_os = st.text_input("Filtrar por OS ou Comboio:", placeholder="Ex: 117 ou 4670")
             df_prev = pd.DataFrame(d_preview)[["OS", "Dias", "LocalApr", "HoraApr", "Serv", "LocalRet", "HoraRet", "PNT", "RepFora"]]
             if filtro_os.strip():
