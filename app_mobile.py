@@ -6,7 +6,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from fpdf import FPDF
 
 warnings.filterwarnings("ignore")
-st.set_page_config(page_title="Escalas ORV CP - by Luís Maia", page_icon="alfa-pendular-wext3_856.jpg", layout="wide")
+st.set_page_config(page_title="Escalas ORV CP - by Luís Maia", page_icon="🚄", layout="wide")
 
 FERIADOS = {
     "2026-01-01","2026-04-03","2026-04-05","2026-04-25","2026-05-01","2026-06-04","2026-06-10","2026-07-04","2026-08-15","2026-10-05","2026-11-01","2026-12-01","2026-12-08","2026-12-25",
