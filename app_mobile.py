@@ -28,28 +28,81 @@ def fmt_hm(mins, com_sinal=False):
     m = abs(int(round(mins)))
     return f"{s}{m//60:02d}h{m%60:02d}m"
 
+def extrair_marchas_livro_ip_cp(pdf_obj):
+    """Lê tabelas verticais dos Livros Horários Técnicos IP/CP (Estações à esquerda, Comboios nas colunas)."""
+    encontrados = {}
+    for pag in pdf_obj.pages:
+        tabelas = pag.extract_tables() or []
+        for tab in tabelas:
+            if not tab or len(tab) < 4:
+                continue
+            # Procura a linha de cabeçalho que contém os números dos comboios
+            idx_cab = -1
+            cols_cb = {}
+            for r_i, row in enumerate(tab[:6]):
+                for c_i, cell in enumerate(row):
+                    txt = str(cell or "").strip()
+                    m = re.match(r'^(\d{3,5})(?:/\d)?$', txt)
+                    if m:
+                        cols_cb[c_i] = m.group(1)
+                if len(cols_cb) >= 2:
+                    idx_cab = r_i
+                    break
+            if idx_cab == -1:
+                continue
+
+            # Varre cada coluna de comboio para apanhar Origem/Partida e Destino/Chegada
+            for c_i, num_cb in cols_cb.items():
+                pontos = []
+                for row in tab[idx_cab + 1:]:
+                    if len(row) <= c_i:
+                        continue
+                    est = re.sub(r'\s+', ' ', str(row or "")).strip()
+                    val = str(row[c_i] or "").strip()
+                    horas = re.findall(r'\b([0-2]?\d:[0-5]\d)\b', val)
+                    if horas and est and not est.isdigit():
+                        pontos.append((est, horas, horas[-1]))
+                if len(pontos) >= 2 and num_cb not in encontrados:
+                    encontrados[num_cb] = {
+                        "Origem": pontos[:12],
+                        "Partida": pontos,
+                        "Destino": pontos[-1][:12],
+                        "Chegada": pontos[-1]
+                    }
+    return encontrados
+
+@st.cache_data(show_spinner=False)
 def carregar_base_comboios():
+    base = {}
     if os.path.exists("comboios.csv"):
         try:
             df = pd.read_csv("comboios.csv", sep=";", dtype=str).fillna("")
-            return {str(row["Comboio"]).strip(): {"Origem": row["Origem"].strip(), "Partida": row["Partida"].strip(), "Destino": row["Destino"].strip(), "Chegada": row["Chegada"].strip()} for _, row in df.iterrows() if str(row["Comboio"]).strip()}
+            for _, row in df.iterrows():
+                cb = str(row["Comboio"]).strip()
+                if cb:
+                    base[cb] = {
+                        "Origem": row["Origem"].strip(),
+                        "Partida": row["Partida"].strip(),
+                        "Destino": row["Destino"].strip(),
+                        "Chegada": row["Chegada"].strip()
+                    }
         except Exception:
             pass
-    return {}
+
+    if os.path.isdir("horarios"):
+        for fich in os.listdir("horarios"):
+            if fich.lower().endswith(".pdf"):
+                try:
+                    with pdfplumber.open(os.path.join("horarios", fich)) as pdf:
+                        base.update(extrair_marchas_livro_ip_cp(pdf))
+                except Exception:
+                    pass
+    return base
 
 def extrair_horarios_de_pdf_cp(uploaded_pdf):
-    novos = {}
     with pdfplumber.open(io.BytesIO(uploaded_pdf.read())) as pdf:
-        for pag in pdf.pages:
-            txt = pag.extract_text() or ""
-            for linha in txt.splitlines():
-                m_cb = re.search(r'\b(\d{3,5})\b', linha)
-                horas = re.findall(r'\b([0-2]?\d:[0-5]\d)\b', linha)
-                if m_cb and len(horas) >= 2:
-                    cb = m_cb.group(1)
-                    if cb not in novos:
-                        novos[cb] = {"Origem": "EST1", "Partida": horas[0], "Destino": "EST2", "Chegada": horas[-1]}
-    return novos
+        return extrair_marchas_livro_ip_cp(pdf)
+
 
 def processar_linhas_brutas(linhas):
     dados, os_atual, dias_atual = [], None, ""
