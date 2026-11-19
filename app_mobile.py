@@ -715,13 +715,14 @@ with aba_edit:
                 st.session_state["base_comboios"][n_cb.strip()] = {"Origem": n_or.strip() or "EST", "Partida": n_pa.strip(), "Destino": n_de.strip() or "EST", "Chegada": n_ch.strip()}
                 st.success(f"Comboio {n_cb} adicionado!")
         pdf_hor = st.file_uploader("Ou extrair comboios de um PDF de Horários CP:", type=["pdf"], key="pdf_hor")
-        if pdf_hor and st.button("📥 Extrair Horários do PDF"):
+               if pdf_hor and st.button("📥 Extrair Horários do PDF"):
             ext = extrair_horarios_de_pdf_cp(pdf_hor)
             st.session_state["base_comboios"].update(ext)
-               st.success(f"Extraídos {len(ext)} comboios do PDF!")
+            st.success(f"Extraídos {len(ext)} comboios do PDF!")
+
     arq_sim = st.file_uploader("Carrega a Escala Base para Editar (.xlsx ou .pdf)", type=["xlsx", "pdf"], key="sim")
     if arq_sim:
-        d_sim, meta_sim = ler_ficheiro_carregado(arq_sim)
+
         tot_os_sim = obter_total_os(d_sim)
         os_sel = st.multiselect("Seleciona as OS que queres editar:", options=list(range(1, tot_os_sim + 1)), default=[min(117, tot_os_sim)])
         if os_sel:
