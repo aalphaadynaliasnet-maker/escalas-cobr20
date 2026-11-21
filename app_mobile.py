@@ -113,21 +113,39 @@ def extrair_horarios_de_pdf_cp(uploaded_pdf):
 def processar_linhas_brutas(linhas):
     dados, os_atual, dias_atual = [], None, ""
     col_os, col_dias, col_lapr, col_hapr, col_serv, col_lret, col_hret, col_pnt, col_reps, col_repf, col_obs = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
-    lixo = ("EM VIGOR", "ALTERAÇÃO", "CATEGORIA", "DEPÓSITO", "Planeamento", "Versão electrónica", "F.500.02", "Revisão e Venda", "Local", "Hora")
+    lixo = ("EM VIGOR", "ALTERAÇÃO", "CATEGORIA", "DEPÓSITO", "Planeamento", "Versão electrónica", "F.500.02", "Revisão e Venda")
     for r in linhas:
         r = [re.sub(r'\s+', ' ', str(c)).strip() if c is not None else "" for c in r]
         if not any(r) or any(p in " ".join(r) for p in lixo):
             continue
+
+        # 1. Deteta o cabeçalho principal (OS, Dias da Semana, Designação, PNT, REP)
         if any("Dias da Semana" in c for c in r):
             for idx, txt in enumerate(r):
                 if txt == "OS": col_os = idx
                 elif "Dias da Semana" in txt: col_dias = idx
                 elif "Designação" in txt: col_serv = idx
                 elif "PNT" in txt: col_pnt = idx
+                elif txt == "REP":
+                    col_reps = idx
+                    col_repf = idx + 1
             col_lapr, col_hapr = col_dias + 1, col_dias + 2
             col_lret, col_hret = max(0, col_pnt - 2), max(0, col_pnt - 1)
-            col_reps, col_repf, col_obs = col_pnt + 1, col_pnt + 2, col_pnt + 3
+            if "REP" not in r:
+                col_reps, col_repf = col_pnt + 1, col_pnt + 2
+            col_obs = col_repf + 1
             continue
+
+        # 2. Deteta a linha de subcabeçalho exata (Local | Hora | Local | Hora | S | F)
+        if "S" in r and "F" in r and ("Local" in r or "Hora" in r):
+            for idx, txt in enumerate(r):
+                if txt == "S" and idx > col_pnt:
+                    col_reps = idx
+                elif txt == "F" and idx > col_reps:
+                    col_repf = idx
+                    col_obs = idx + 1
+            continue
+
         if len(r) <= col_pnt:
             continue
         c_os = r[col_os]
@@ -136,6 +154,7 @@ def processar_linhas_brutas(linhas):
         c_dias = r[col_dias]
         if c_dias and "Dias" not in c_dias:
             dias_atual = c_dias
+
         if os_atual:
             serv = r[col_serv] if len(r) > col_serv else ""
             lapr = r[col_lapr] if len(r) > col_lapr else ""
@@ -146,6 +165,24 @@ def processar_linhas_brutas(linhas):
             reps = r[col_reps] if len(r) > col_reps else ""
             repf = r[col_repf] if len(r) > col_repf else ""
             obs = r[col_obs] if len(r) > col_obs else ""
+
+            # Fallback caso o pdfplumber tenha inserido uma coluna vazia entre PNT e S/F
+            if reps.lower() != "x" and repf.lower() != "x" and len(r) > col_pnt + 1:
+                zona_rep = [c.lower() for c in r[col_pnt + 1 : min(len(r), col_pnt + 5)]]
+                if "x" in zona_rep:
+                    pos_x = zona_rep.index("x")
+                    # Se houver dois slots antes de Obs: primeiro é S, segundo é F
+                    if pos_x == 0:
+                        reps = "x"
+                    elif pos_x == 1:
+                        # Verifica se o slot 0 era coluna fantasma vazia ou mesmo a coluna S
+                        if len(r) > col_pnt + 3 and r[col_pnt + 1] == "" and r[col_pnt + 3] == "":
+                            reps = "x"
+                        else:
+                            repf = "x"
+                    elif pos_x >= 2:
+                        repf = "x"
+
             if c_dias or serv or pnt:
                 dados.append({
                     "OS": os_atual, "Dias": c_dias, "Dias_Efet": dias_atual,
