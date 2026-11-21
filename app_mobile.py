@@ -443,6 +443,23 @@ def auditar_repousos_sequencia(linhas_simuladas, escala_completa, sede="COB"):
         self.set_font("Helvetica", "I", 8.5)
         self.set_text_color(110, 110, 110)
         self.cell(0, 6, limpar_latin1(f"Escala {self.titulo_escala}  |  by Luís Maia  |  Página {self.page_no()}/{{nb}}"), align="C")
+class PDFComAssinatura(FPDF):
+    def __init__(self, titulo_escala="COBR20", *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.titulo_escala = titulo_escala
+
+    def header(self):
+        self.set_font("Helvetica", "B", 38)
+        self.set_text_color(242, 244, 247)
+        with self.rotation(30, x=148, y=105):
+            self.text(85, 115, limpar_latin1("by Luís Maia"))
+        self.set_text_color(20, 20, 20)
+
+    def footer(self):
+        self.set_y(-11)
+        self.set_font("Helvetica", "I", 8.5)
+        self.set_text_color(110, 110, 110)
+        self.cell(0, 6, limpar_latin1(f"Escala {self.titulo_escala}  |  by Luís Maia  |  Página {self.page_no()}/{{nb}}"), align="C")
 
 def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, dist_rows, sem_rows, titulo_esc="COBR20", so_os=False):
     pdf = PDFComAssinatura(titulo_escala=titulo_esc, orientation="L", unit="mm", format="A4")
