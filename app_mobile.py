@@ -1040,7 +1040,7 @@ with aba_edit:
                         txt_edit = f"[{dias_txt}] {hora_a}-{hora_r} | {serv_txt} ({pnt_calc})"
                         linhas_comp_pdf.append((f"OS {os_num:03d}", txt_orig, txt_edit))
 
-                    alertas_descanso = auditar_repousos_sequencia(linhas_para_repouso, sede=sede_sim)
+                    alertas_descanso = auditar_repousos_sequencia(linhas_para_repouso, d_sim, sede=sede_sim)
                     infracoes_totais.extend(alertas_descanso)
 
                     st.subheader("📋 Resultado da Auditoria (Linhas Marcadas)")
