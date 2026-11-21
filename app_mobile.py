@@ -547,6 +547,356 @@ def converter_pdf_para_excel_validado(uploaded_pdf):
         cell = ws.cell(row=2, column=c_idx)
         cell.font, cell.alignment, cell.border = fonte_bold, centro, borda_fina
 
-        for rng in ("C1:E1", "C2:E2", "G1:K1", "G2:K2", "A4:A5", "B4:B5", "C4:D4", "E4:E5", "F4:G4", "H4:H5", "I4:J4", "K4:K5"):
+    for rng in ("C1:E1", "C2:E2", "G1:K1", "G2:K2", "A4:A5", "B4:B5", "C4:D4", "E4:E5", "F4:G4", "H4:H5", "I4:J4", "K4:K5"):
             ws.merge_cells(rng)
+    lixo = ("EM VIGOR", "ALTERAÇÃO", "CATEGORIA", "DEPÓSITO", "Planeamento", "Versão electrónica", "F.500.02", "Revisão e Venda", "Local", "Hora", "Dias da Semana")
+    os_encontradas, os_atual, inicio_os_row = set(), None, None
+
+    for r in todas_linhas:
+        r = [re.sub(r'\s+', ' ', str(c)).strip() if c is not None else "" for c in r]
+        if not any(r) or any(p in " ".join(r) for p in lixo) or len(r) < 10:
+            continue
+        linha_11 = (r + [""] * 11)[:11]
+        c_os = linha_11[0]
+        if c_os.isdigit() and 1 <= int(c_os) <= 365:
+            if os_atual and inicio_os_row and ws.max_row > inicio_os_row:
+                ws.merge_cells(start_row=inicio_os_row, start_column=1, end_row=ws.max_row, end_column=1)
+            os_atual = int(c_os)
+            os_encontradas.add(os_atual)
+            linha_11[0] = os_atual
+            inicio_os_row = ws.max_row + 1
+        elif os_atual:
+            linha_11[0] = ""
+        else:
+            continue
+
+        ws.append(linha_11)
+        row_num = ws.max_row
+        for c_idx in range(1, 12):
+            cell = ws.cell(row=row_num, column=c_idx)
+            cell.border = borda_fina
+            cell.font = fonte_bold if c_idx == 1 else fonte_norm
+            cell.alignment = esq if c_idx in (5, 11) else centro
+
+    if os_atual and inicio_os_row and ws.max_row > inicio_os_row:
+        ws.merge_cells(start_row=inicio_os_row, start_column=1, end_row=ws.max_row, end_column=1)
+
+    larguras = (6, 16, 10, 8, 42, 10, 8, 8, 5, 5, 22)
+    for idx_col, larg in enumerate(larguras, start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(idx_col)].width = larg
+
+    tot_esp = max(os_encontradas, default=120)
+    em_falta = sorted(set(range(1, tot_esp + 1)) - os_encontradas)
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue(), len(os_encontradas), tot_esp, em_falta
+
+def aplicar_visual_cp(img_path="alfa-pendular-wext3_856.jpg"):
+    bg_css = ""
+    try:
+        with open(img_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        bg_css = f"background-image: linear-gradient(120deg, rgba(0, 55, 30, 0.80), rgba(15, 23, 42, 0.70)), url('data:image/jpeg;base64,{b64}');"
+    except Exception:
+        bg_css = "background: linear-gradient(120deg, #006837, #0F172A);"
+
+    st.markdown(f"""
+    <style>
+        .hero-cp {{
+            {bg_css}
+            background-size: cover;
+            background-position: center 65%;
+            padding: 28px 24px;
+            border-radius: 16px;
+            color: white;
+            margin-bottom: 18px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        }}
+        .hero-cp h1 {{ color: #FFFFFF !important; margin: 0; font-size: 1.9rem; }}
+        .hero-cp p {{ color: #E2E8F0 !important; margin: 6px 0 0 0; font-size: 0.95rem; }}
+        div[data-testid="stMetric"] {{
+            background-color: #FFFFFF;
+            border-left: 5px solid #006837;
+            padding: 12px 14px;
+            border-radius: 10px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+        }}
+    </style>
+    <div class="hero-cp">
+        <h1>Escalas ORV CP</h1>
+        <p>Gestão, Comparação e Simulação Nacional de Escalas &bull; <b>by Luís Maia</b></p>
+    </div>
+    """, unsafe_allow_html=True)
+
+def verificar_acesso():
+    if st.session_state.get("autenticado"):
+        return True
+    st.markdown("### 🔒 Acesso Reservado")
+    senha_digitada = st.text_input("Insere a palavra-passe de acesso:", type="password")
+    if st.button("Entrar", type="primary"):
+        senha_correta = st.secrets.get("SENHA_APP", "COBR20")
+        if senha_digitada == senha_correta:
+            st.session_state["autenticado"] = True
+            st.rerun()
+        else:
+            st.error("❌ Palavra-passe incorreta.")
+    return False
+
+def processar_comparacao_mobile(d_ant, d_nov, data_ini_str, titulo_esc="COBR20"):
+    max_os = max(obter_total_os(d_ant), obter_total_os(d_nov))
+    sems_ant = calcular_semanas_detalhado(d_ant, data_ini_str, max_os)
+    sems_nov = calcular_semanas_detalhado(d_nov, data_ini_str, max_os)
+    c_ant, c_nov, os_alt, os_gan, os_sup, rep_alt = {}, {}, 0, 0, 0, []
+    lista_os_alt, lista_cb_mov, lista_rep_alt = [], [], []
+
+    for os_n in range(1, max_os + 1):
+        sa, sn = [x for x in d_ant if x["OS"] == os_n], [x for x in d_nov if x["OS"] == os_n]
+        ta = "\n".join(f"- [{x['Dias']}] {x['Serv']} ({x['PNT'][:5]}){' [REP FORA: '+x['LocalRet']+']' if x['RepFora'] else ''}" for x in sa if x["Dias"] or x["Serv"])
+        tn = "\n".join(f"- [{x['Dias']}] {x['Serv']} ({x['PNT'][:5]}){' [REP FORA: '+x['LocalRet']+']' if x['RepFora'] else ''}" for x in sn if x["Dias"] or x["Serv"])
+        rep_a = sorted(set(f"{x['Dias_Efet']} ({x['LocalRet']})" for x in sa if x["RepFora"]))
+        rep_n = sorted(set(f"{x['Dias_Efet']} ({x['LocalRet']})" for x in sn if x["RepFora"]))
+        if rep_a != rep_n: rep_alt.append((os_n, rep_a, rep_n))
+        for x in sa:
+            for cb in comboios(x["Serv"]): c_ant.setdefault(cb, set()).add(os_n)
+        for x in sn:
+            for cb in comboios(x["Serv"]): c_nov.setdefault(cb, set()).add(os_n)
+        if ta != tn:
+            os_alt += 1
+            if "SUPRA" not in ta and "SUPRA" in tn: tp, cor, os_sup = "PASSOU A SUPRA", (255, 235, 156), os_sup + 1
+            elif "SUPRA" in ta and "SUPRA" not in tn: tp, cor, os_gan = "GANHOU SERVIÇO", (198, 239, 206), os_gan + 1
+            else: tp, cor = "AJUSTE HORÁRIO / COMBOIO", (217, 225, 242)
+            lista_os_alt.append((f"OS {os_n:03d}", tp, ta, tn, cor))
+
+    cb_nov, cb_sup, cb_trf = 0, 0, 0
+    for cb in sorted(set(c_ant) | set(c_nov), key=int):
+        oa, on = sorted(c_ant.get(cb, set())), sorted(c_nov.get(cb, set()))
+        if oa != on:
+            saiu = ", ".join(f"OS {x}" for x in sorted(set(oa)-set(on))) or "-"
+            entrou = ", ".join(f"OS {x}" for x in sorted(set(on)-set(oa))) or "-"
+            if not oa: mv, cor, cb_nov = "NOVO NA ESCALA", (198, 239, 206), cb_nov + 1
+            elif not on: mv, cor, cb_sup = "SUPRIMIDO", (255, 199, 206), cb_sup + 1
+            else: mv, cor, cb_trf = "TRANSFERIDO", (255, 235, 156), cb_trf + 1
+            lista_cb_mov.append((cb, mv, saiu, entrou, ", ".join(f"OS {x}" for x in oa) or "-", ", ".join(f"OS {x}" for x in on) or "-", cor))
+
+    for os_n, ra, rn in rep_alt:
+        if len(rn) > len(ra): st_r, cor = "GANHOU REPOUSO", (198, 239, 206)
+        elif len(rn) < len(ra): st_r, cor = "PERDEU REPOUSO", (255, 199, 206)
+        else: st_r, cor = "ALTEROU REP FORA", (217, 225, 242)
+        lista_rep_alt.append((f"OS {os_n:03d}", st_r, ", ".join(ra) if ra else "Sem rep. fora", ", ".join(rn) if rn else "Sem rep. fora", cor))
+
+    m_ant, m_nov = sum(sems_ant) / float(max_os), sum(sems_nov) / float(max_os)
+    rep_tot_ant, rep_tot_nov = contar_repousos_escala(d_ant, max_os), contar_repousos_escala(d_nov, max_os)
+    dif_rep, dm, scb, sos = rep_tot_nov - rep_tot_ant, m_nov - m_ant, len(c_nov) - len(c_ant), os_gan - os_sup
+    txt_rep = f"GANHOU {dif_rep} repouso(s) (+{dif_rep})" if dif_rep > 0 else (f"PERDEU {abs(dif_rep)} repouso(s) ({dif_rep})" if dif_rep < 0 else "Manteve repousos (0)")
+    cor_rep = (198, 239, 206) if dif_rep > 0 else ((255, 199, 206) if dif_rep < 0 else (217, 225, 242))
+
+    balanco_rows = [
+        ("Total de Repousos Fora da Sede (REP F)", f"{rep_tot_ant} -> {rep_tot_nov}", txt_rep, cor_rep),
+        ("Carga Horária Média Semanal", f"{fmt_hm(m_ant)} -> {fmt_hm(m_nov)}", f"Diferença semanal: {fmt_hm(dm, True)}", (217, 225, 242)),
+        ("Comboios distintos na Escala", f"{len(c_ant)} -> {len(c_nov)}", f"Novos: +{cb_nov} | Suprimidos: -{cb_sup} | Transf.: {cb_trf}", (245, 245, 245)),
+        ("SALDO LÍQUIDO DE COMBOIOS", f"{scb:+d}", "Ganho/Perda líquida de circulações", (198, 239, 206) if scb>0 else ((255, 199, 206) if scb<0 else (217, 225, 242))),
+        ("Total de OS alteradas", f"{os_alt} / {max_os}", f"Ganharam serviço: +{os_gan} | Passaram a SUPRA: -{os_sup}", (217, 225, 242)),
+        ("SALDO LÍQUIDO DE OS COM SERVIÇO", f"{sos:+d}", "Balanço entre OS ganhas e SUPRA", (198, 239, 206) if sos>0 else ((255, 199, 206) if sos<0 else (217, 225, 242))),
+    ]
+
+    ind_ant, ind_nov = calcular_indicadores_dia(d_ant, max_os), calcular_indicadores_dia(d_nov, max_os)
+    nomes_dias = ("Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado")
+    dist_rows = []
+    for d_idx in range(1, 8):
+        s_a, s_n = ind_ant[d_idx]["SERVICOS"], ind_nov[d_idx]["SERVICOS"]
+        u_a, u_n = ind_ant[d_idx]["SUPRA"], ind_nov[d_idx]["SUPRA"]
+        desc_n, dif_s = ind_nov[d_idx]["DESCANSO"], s_n - s_a
+        cor_l = (198, 239, 206) if dif_s > 0 else ((255, 199, 206) if dif_s < 0 else (248, 248, 248))
+        dist_rows.append((nomes_dias[d_idx-1], f"{s_a} -> {s_n}", f"{dif_s:+d}", f"{u_a} -> {u_n}", str(desc_n), str(s_n+u_n+desc_n), cor_l))
+
+    num_blocos = max(1, max_os // 12)
+    sem_rows = []
+    for b_idx in range(num_blocos):
+        ini_s, fim_s = b_idx * 12, (b_idx + 1) * 12
+        sa12, sn12 = sum(sems_ant[ini_s:fim_s]), sum(sems_nov[ini_s:fim_s])
+        sem_rows.append((f"BLOCO {b_idx+1}", f"Sem {ini_s+1} a {fim_s}", fmt_hm(sa12), fmt_hm(sn12), fmt_hm(sn12 - sa12, True)))
+
+    pdf_completo = gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, dist_rows, sem_rows, titulo_esc=titulo_esc, so_os=False)
+    pdf_so_os = gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, dist_rows, sem_rows, titulo_esc=titulo_esc, so_os=True)
+    resumo = {"rep_ant": rep_tot_ant, "rep_nov": rep_tot_nov, "dif_rep": dif_rep, "scb": scb, "sos": sos, "h_ant": fmt_hm(m_ant), "h_nov": fmt_hm(m_nov)}
+    return pdf_completo, pdf_so_os, resumo
+# --- INTERFACE PRINCIPAL ---
+aplicar_visual_cp("alfa-pendular-wext3_856.jpg")
+if not verificar_acesso():
+    st.stop()
+
+if "base_comboios" not in st.session_state:
+    st.session_state["base_comboios"] = carregar_base_comboios()
+
+aba_comp, aba_edit, aba_conv = st.tabs(["📊 Comparar Escalas", "✏️ Editor & Simulador de OS", "🔄 Converter PDF → Excel"])
+
+with aba_comp:
+    arq_ant = st.file_uploader("1. Escala Anterior (Excel ou PDF)", type=["xlsx", "pdf"], key="ant")
+    arq_nov = st.file_uploader("2. Escala Nova (Excel ou PDF)", type=["xlsx", "pdf"], key="nov")
+    data_ini = st.date_input("Início da Escala (Dom)", value=datetime(2026, 11, 22))
+
+    if arq_nov:
+        d_preview, meta_nov = ler_ficheiro_carregado(arq_nov)
+        arq_nov.seek(0)
+        with st.expander(f"👁️ Visualizar Escala: {meta_nov['Deposito']} ({meta_nov['Escala']} — {obter_total_os(d_preview)} OS)", expanded=True):
+            filtro_os = st.text_input("Filtrar por OS ou Comboio:", placeholder="Ex: 117 ou 4670")
+            df_prev = pd.DataFrame(d_preview)[["OS", "Dias", "LocalApr", "HoraApr", "Serv", "LocalRet", "HoraRet", "PNT", "RepFora"]]
+            if filtro_os.strip():
+                df_prev = df_prev[df_prev["OS"].astype(str).str.contains(filtro_os.strip()) | df_prev["Serv"].str.contains(filtro_os.strip(), case=False)]
+            st.dataframe(df_prev, use_container_width=True, hide_index=True)
+
+    if arq_ant and arq_nov:
+        if st.button("🔍 Comparar Escalas", type="primary", use_container_width=True):
+            with st.spinner("A processar escalas..."):
+                d_a, _ = ler_ficheiro_carregado(arq_ant)
+                d_n, meta_n = ler_ficheiro_carregado(arq_nov)
+                p_comp, p_os, res = processar_comparacao_mobile(d_a, d_n, data_ini.strftime("%Y-%m-%d"), titulo_esc=meta_n["Escala"])
+                st.session_state["mob_res"] = (p_comp, p_os, res, meta_n["Escala"])
+
+    if "mob_res" in st.session_state:
+        p_comp, p_os, res, cod_esc_res = st.session_state["mob_res"]
+        st.success(f"Comparação concluída ({cod_esc_res})!")
+        c1, c2 = st.columns(2)
+        c1.metric("Repousos Fora", f"{res['rep_ant']} → {res['rep_nov']}", f"{res['dif_rep']:+d}")
+        c2.metric("Saldo Comboios", f"{res['scb']:+d}")
+        c3, c4 = st.columns(2)
+        c3.metric("Saldo OS Serviço", f"{res['sos']:+d}")
+        c4.metric("Média Horas/Sem", res["h_nov"], f"Antes: {res['h_ant']}")
+
+        st.download_button("📕 Descarregar PDF Completo", data=p_comp, file_name=f"Comparacao_{cod_esc_res}.pdf", mime="application/pdf", use_container_width=True)
+        st.download_button("📋 Descarregar PDF Só OS Alteradas", data=p_os, file_name=f"OS_Alteradas_{cod_esc_res}.pdf", mime="application/pdf", use_container_width=True)
+
+with aba_edit:
+    st.markdown(
+        "Edita as **OS pretendidas** usando os números dos comboios (ex: `722 - (TR) - 4674`). "
+        "Marca a caixa **Simular** nas linhas que queres auditar (**Repouso Sede 14h**, **Fora 9h**, **TR 45m** e **PNT 6h-9h**)."
+    )
+
+    with st.expander("🚆 Gerir Horários de Comboios (comboios.csv)", expanded=False):
+        c_g1, c_g2, c_g3, c_g4, c_g5 = st.columns(5)
+        n_cb = c_g1.text_input("Comboio", placeholder="722")
+        n_or = c_g2.text_input("Origem", placeholder="AVO")
+        n_pa = c_g3.text_input("Partida", placeholder="15:56")
+        n_de = c_g4.text_input("Destino", placeholder="COB")
+        n_ch = c_g5.text_input("Chegada", placeholder="16:30")
+        if st.button("➕ Guardar Comboio na Sessão"):
+            if n_cb.strip() and n_pa.strip() and n_ch.strip():
+                st.session_state["base_comboios"][n_cb.strip()] = {
+                    "Origem": n_or.strip() or "EST",
+                    "Partida": n_pa.strip(),
+                    "Destino": n_de.strip() or "EST",
+                    "Chegada": n_ch.strip()
+                }
+                st.success(f"Comboio {n_cb} adicionado!")
+
+        pdf_hor = st.file_uploader("Ou extrair comboios de um PDF de Horários CP:", type=["pdf"], key="pdf_hor")
+        if pdf_hor and st.button("📥 Extrair Horários do PDF"):
+            ext = extrair_horarios_de_pdf_cp(pdf_hor)
+            st.session_state["base_comboios"].update(ext)
+            st.success(f"Extraídos {len(ext)} comboios do PDF!")
+
+    arq_sim = st.file_uploader("Carrega a Escala Base para Editar (.xlsx ou .pdf)", type=["xlsx", "pdf"], key="sim")
+    if arq_sim:
+        d_sim, meta_sim = ler_ficheiro_carregado(arq_sim)
+        arq_sim.seek(0)
+        tot_os_sim = obter_total_os(d_sim)
+        sede_sim = meta_sim.get("Sede", "COB")
+
+        os_sel = st.multiselect(
+            "Seleciona as OS que queres visualizar/editar:",
+            options=list(range(1, tot_os_sim + 1)),
+            default=[min(117, tot_os_sim)]
+        )
+
+        if os_sel:
+            linhas_orig = [x for x in d_sim if x["OS"] in os_sel]
+            df_edit_base = pd.DataFrame(linhas_orig)[
+                ["OS", "Dias", "LocalApr", "HoraApr", "Serv", "LocalRet", "HoraRet", "PNT", "RepFora"]
+            ].copy()
+
+            df_edit_base.insert(0, "Simular", True)
+
+            st.caption("✏️ Edita a coluna **Serv** (ou horários) e deixa o visto **Simular** ativo apenas nas linhas a auditar:")
+            df_editado = st.data_editor(
+                df_edit_base,
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                column_config={
+                    "Simular": st.column_config.CheckboxColumn("Simular", help="Marcar para incluir esta linha na auditoria", default=True),
+                    "OS": st.column_config.NumberColumn("OS", min_value=1, max_value=365, step=1, format="%d"),
+                    "Dias": st.column_config.TextColumn("Dias"),
+                    "LocalApr": st.column_config.TextColumn("Local Apr"),
+                    "HoraApr": st.column_config.TextColumn("Hora Apr"),
+                    "Serv": st.column_config.TextColumn("Designação dos Serviços", width="large"),
+                    "LocalRet": st.column_config.TextColumn("Local Ret"),
+                    "HoraRet": st.column_config.TextColumn("Hora Ret"),
+                    "PNT": st.column_config.TextColumn("PNT"),
+                    "RepFora": st.column_config.CheckboxColumn("Rep Fora")
+                },
+                key="editor_os_sim"
+            )
+
+            col_b1, col_b2 = st.columns((1, 1))
+            recalc_auto = col_b2.checkbox("Recalcular horários via comboios.csv", value=True)
+
+            if col_b1.button("🧪 Simular e Auditar Linhas Selecionadas", type="primary", use_container_width=True):
+                df_selecionadas = df_editado[df_editado["Simular"] == True].copy()
+
+                if df_selecionadas.empty:
+                    st.warning("⚠️ Marca pelo menos uma linha com o visto **Simular** para correr a auditoria.")
+                else:
+                    infracoes_totais = []
+                    linhas_comp_pdf = []
+                    linhas_para_repouso = []
+
+                    for idx, row in df_selecionadas.iterrows():
+                        os_num = int(row["OS"])
+                        serv_txt = str(row["Serv"]).strip()
+                        dias_txt = str(row["Dias"]).strip()
+
+                        loc_a, hora_a, loc_r, hora_r, pnt_calc, alertas_linha = auditar_linha_editada(
+                            serv_txt, st.session_state["base_comboios"], sede=sede_sim
+                        )
+
+                        if not recalc_auto or not hora_a:
+                            loc_a = str(row["LocalApr"]).strip() or loc_a
+                            hora_a = str(row["HoraApr"]).strip() or hora_a
+                            loc_r = str(row["LocalRet"]).strip() or loc_r
+                            hora_r = str(row["HoraRet"]).strip() or hora_r
+                            pnt_calc = str(row["PNT"]).strip() or pnt_calc
+
+                        ma, mr = hora_para_min(hora_a), hora_para_min(hora_r)
+                        if ma is not None and mr is not None and not recalc_auto:
+                            dur_m = (mr - ma) if mr >= ma else ((24 * 60 - ma) + mr)
+                            pnt_calc = f"{dur_m // 60:02d}:{dur_m % 60:02d}"
+                            if dur_m < 6 * 60:
+                                alertas_linha.append(f"🔴 PNT abaixo do mínimo (06h00): {fmt_hm(dur_m)}")
+                            elif dur_m > 9 * 60:
+                                alertas_linha.append(f"🔴 PNT acima do máximo (09h00): {fmt_hm(dur_m)}")
+
+                        for al in alertas_linha:
+                            infracoes_totais.append(f"OS {os_num:03d} [{dias_txt}]: {al}")
+
+                        linhas_para_repouso.append({
+                            "OS": os_num,
+                            "Dias": dias_txt,
+                            "LocalApr": loc_a,
+                            "HoraApr": hora_a,
+                            "LocalRet": loc_r,
+                            "HoraRet": hora_r,
+                            "RepFora": bool(row["RepFora"])
+                        })
+
+                        orig_match = next((o for o in linhas_orig if o["OS"] == os_num and o["Dias"] == dias_txt), None)
+                        txt_orig = f"[{orig_match['Dias']}] {orig_match['HoraApr']}-{orig_match['HoraRet']} | {orig_match['Serv']} ({orig_match['PNT']})" if orig_match else "Nova linha simulada"
+                        txt_edit = f"[{dias_txt}] {hora_a}-{hora_r} | {serv_txt} ({pnt_calc})"
+                        linhas_comp_pdf.append((f"OS {os_num:03d}", txt_orig, txt_edit))
+
+                    alertas_descanso = auditar_repousos_sequencia(linhas_para_repouso, sede=sede_sim)
+                    infracoes_totais.extend(alertas_descanso)
+
+                    st.subheader("📋 Resultado da Auditoria (Linhas Marcadas)")
+                    if not infracoes_totais:
+                        st.success("✅ Nenhuma infração detetada nas linhas selecionadas!")
 
