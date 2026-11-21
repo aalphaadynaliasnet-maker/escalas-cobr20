@@ -64,11 +64,11 @@ def extrair_marchas_livro_ip_cp(pdf_obj):
                 for row in tab[idx_cab + 1:]:
                     if len(row) <= c_i:
                         continue
-                    est = re.sub(r'\s+', ' ', str(row or "")).strip()
+                    est = re.sub(r'\s+', ' ', str(row[0] or "")).strip()
                     val = str(row[c_i] or "").strip()
                     horas = re.findall(r'\b([0-2]?\d:[0-5]\d)\b', val)
                     if horas and est and not est.isdigit():
-                        pontos.append((est, horas, horas[-1]))
+                        pontos.append((est, horas[0], horas[-1]))
                 if len(pontos) >= 2 and num_cb not in encontrados:
                     encontrados[num_cb] = {
                         "Origem": pontos[:12],
