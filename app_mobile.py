@@ -1044,8 +1044,87 @@ with aba_edit:
                     infracoes_totais.extend(alertas_descanso)
 
                     st.subheader("📋 Resultado da Auditoria (Linhas Marcadas)")
+                                        infracoes_totais = []
+                    linhas_comp_pdf = []
+                    linhas_para_repouso = []
+
+                    for idx, row in df_selecionadas.iterrows():
+                        os_num = int(row["OS"])
+                        serv_txt = str(row["Serv"]).strip()
+                        dias_txt = str(row["Dias"]).strip()
+
+                        loc_a, hora_a, loc_r, hora_r, pnt_calc, alertas_linha = auditar_linha_editada(
+                            serv_txt, st.session_state["base_comboios"], sede=sede_sim
+                        )
+
+                        if not recalc_auto or not hora_a:
+                            alertas_linha = [a for a in alertas_linha if "PNT" not in a]
+                            loc_a = str(row["LocalApr"]).strip() or loc_a
+                            hora_a = str(row["HoraApr"]).strip() or hora_a
+                            loc_r = str(row["LocalRet"]).strip() or loc_r
+                            hora_r = str(row["HoraRet"]).strip() or hora_r
+
+                            ma, mr = hora_para_min(hora_a), hora_para_min(hora_r)
+                            if ma is not None and mr is not None:
+                                dur_m = (mr - ma) if mr >= ma else ((24 * 60 - ma) + mr)
+                                pnt_calc = f"{dur_m // 60:02d}:{dur_m % 60:02d}"
+                                if dur_m < 6 * 60:
+                                    alertas_linha.append(f"🔴 PNT abaixo do mínimo (06h00): {fmt_hm(dur_m)}")
+                                elif dur_m > 9 * 60:
+                                    alertas_linha.append(f"🔴 PNT acima do máximo (09h00): {fmt_hm(dur_m)}")
+                            else:
+                                pnt_calc = str(row["PNT"]).strip()
+
+                        for al in alertas_linha:
+                            infracoes_totais.append(f"OS {os_num:03d} [{dias_txt}]: {al}")
+
+                        linhas_para_repouso.append({
+                            "OS": os_num,
+                            "Dias": dias_txt,
+                            "LocalApr": loc_a,
+                            "HoraApr": hora_a,
+                            "LocalRet": loc_r,
+                            "HoraRet": hora_r,
+                            "PNT": pnt_calc,
+                            "RepFora": bool(row["RepFora"])
+                        })
+
+                        orig_match = next((o for o in linhas_orig if o["OS"] == os_num and o["Dias"] == dias_txt), None)
+                        txt_orig = f"[{orig_match['Dias']}] {orig_match['HoraApr']}-{orig_match['HoraRet']} | {orig_match['Serv']} ({orig_match['PNT']})" if orig_match else "Nova linha simulada"
+                        txt_edit = f"[{dias_txt}] {hora_a}-{hora_r} | {serv_txt} ({pnt_calc})"
+                        linhas_comp_pdf.append((f"OS {os_num:03d}", txt_orig, txt_edit))
+
+                    alertas_descanso = auditar_repousos_sequencia(linhas_para_repouso, d_sim, sede=sede_sim)
+                    infracoes_totais.extend(alertas_descanso)
+
+                    st.subheader("📋 Resultado da Auditoria (Linhas Marcadas)")
                     if not infracoes_totais:
                         st.success("✅ Nenhuma infração detetada nas linhas selecionadas!")
+                    else:
+                        for item in infracoes_totais:
+                            if item.startswith("🔴"):
+                                st.error(item)
+                            elif item.startswith("⚠️"):
+                                st.warning(item)
+                            else:
+                                st.success(item)
+
+                    df_resumo_sim = pd.DataFrame(linhas_para_repouso)
+                    st.dataframe(df_resumo_sim, use_container_width=True, hide_index=True)
+
+                    pdf_sim_bytes = gerar_pdf_impacto_simulacao(
+                        linhas_comp_pdf,
+                        infracoes_totais or ["Sem infrações detetadas."],
+                        titulo_esc=meta_sim.get("Escala", "COBR20")
+                    )
+                    st.download_button(
+                        "📄 Descarregar PDF de Impacto da Simulação",
+                        data=pdf_sim_bytes,
+                        file_name=f"Simulacao_{meta_sim.get('Escala', 'ORV')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+
 with aba_conv:
     st.markdown("Converte qualquer **PDF oficial ORV da CP** para **Excel (`.xlsx`)** mantendo a estrutura exata das 11 colunas e validação automática.")
     pdf_conv = st.file_uploader("Carrega o PDF da Escala CP", type=["pdf"], key="conv")
