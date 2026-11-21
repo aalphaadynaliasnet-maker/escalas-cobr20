@@ -899,4 +899,20 @@ with aba_edit:
                     st.subheader("📋 Resultado da Auditoria (Linhas Marcadas)")
                     if not infracoes_totais:
                         st.success("✅ Nenhuma infração detetada nas linhas selecionadas!")
+with aba_conv:
+    st.markdown("Converte qualquer **PDF oficial ORV da CP** para **Excel (`.xlsx`)** mantendo a estrutura exata das 11 colunas e validação automática.")
+    pdf_conv = st.file_uploader("Carrega o PDF da Escala CP", type=["pdf"], key="conv")
+    if pdf_conv:
+        if st.button("⚙️ Converter PDF → Excel (.xlsx)", type="primary", use_container_width=True):
+            with st.spinner("A extrair e validar as OS..."):
+                xlsx_bytes, lidas, tot_esp, em_falta = converter_pdf_para_excel_validado(pdf_conv)
+                st.session_state["conv_res"] = (xlsx_bytes, lidas, tot_esp, em_falta, pdf_conv.name.replace(".pdf", ".xlsx"))
+
+    if "conv_res" in st.session_state:
+        xlsx_bytes, lidas, tot_esp, em_falta, nome_xlsx = st.session_state["conv_res"]
+        if lidas == tot_esp and not em_falta:
+            st.success(f"✅ Validação 100% OK: Todas as {tot_esp} OS foram convertidas com estrutura oficial CP!")
+        else:
+            st.warning(f"⚠️ Lidas {lidas}/{tot_esp} OS. Em falta: {em_falta}")
+        st.download_button("📗 Descarregar Excel Oficial (.xlsx)", data=xlsx_bytes, file_name=nome_xlsx, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
