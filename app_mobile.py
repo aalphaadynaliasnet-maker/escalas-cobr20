@@ -1044,7 +1044,7 @@ with aba_edit:
                     infracoes_totais.extend(alertas_descanso)
 
                     st.subheader("📋 Resultado da Auditoria (Linhas Marcadas)")
-                                        infracoes_totais = []
+                    infracoes_totais = []
                     linhas_comp_pdf = []
                     linhas_para_repouso = []
 
