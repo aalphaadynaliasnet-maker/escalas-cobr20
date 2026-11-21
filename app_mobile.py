@@ -64,17 +64,17 @@ def extrair_marchas_livro_ip_cp(pdf_obj):
                 for row in tab[idx_cab + 1:]:
                     if len(row) <= c_i:
                         continue
-                    est = re.sub(r'\s+', ' ', str(row[0] or "")).strip()
+                    est = re.sub(r'\s+', ' ', str(row or "")).strip()
                     val = str(row[c_i] or "").strip()
                     horas = re.findall(r'\b([0-2]?\d:[0-5]\d)\b', val)
                     if horas and est and not est.isdigit():
-                        pontos.append((est, horas[0], horas[-1]))
+                        pontos.append((est, horas, horas[-1]))
                 if len(pontos) >= 2 and num_cb not in encontrados:
                     encontrados[num_cb] = {
-                        "Origem": pontos[0][0][:12],
-                        "Partida": pontos[0][1],
-                        "Destino": pontos[-1][0][:12],
-                        "Chegada": pontos[-1][2]
+                        "Origem": pontos[:12],
+                        "Partida": pontos,
+                        "Destino": pontos[-1][:12],
+                        "Chegada": pontos[-1]
                     }
     return encontrados
 
@@ -168,7 +168,7 @@ def ler_ficheiro_carregado(uploaded_file):
     if nome.endswith(".pdf"):
         todas_linhas = []
         with pdfplumber.open(io.BytesIO(bytes_data)) as pdf:
-            txt1 = pdf.pages[0].extract_text() or ""
+            txt1 = pdf.pages.extract_text() or ""
             m_esc = re.search(r'\b([A-Z]{3}R\d{2})\b', txt1)
             if m_esc:
                 meta["Escala"] = m_esc.group(1)
@@ -190,7 +190,6 @@ def ler_ficheiro_carregado(uploaded_file):
         if any(any("Dias da Semana" in c for c in l) for l in linhas):
             return processar_linhas_brutas(linhas), meta
     return [], meta
-
 def obter_total_os(dados):
     return max([x["OS"] for x in dados], default=120)
 
@@ -228,6 +227,122 @@ def calcular_semanas_detalhado(dados, data_ini_str, max_os):
             if m_pnt:
                 por_regra[reg] += int(m_pnt.group(1))*60 + int(m_pnt.group(2))
         for reg, mins in por_regra.items():
+            regras_os[os_n].append((expandir(reg), mins))
+    base = datetime.strptime(data_ini_str, "%Y-%m-%d").date()
+    lista_semanas = []
+    for sem in range(max_os):
+        mins_sem = 0
+        for d in range(7):
+            dia_abs = sem * 7 + d
+            dt = base + timedelta(days=dia_abs)
+            de = 1 if dt.weekday() == 6 else dt.weekday() + 2
+            tp = 'F' if dt.strftime("%Y-%m-%d") in FERIADOS else ('V' if (dt+timedelta(days=1)).strftime("%Y-%m-%d") in FERIADOS else ('S' if (dt-timedelta(days=1)).strftime("%Y-%m-%d") in FERIADOS else 'N'))
+            for pv, mins in regras_os[(dia_abs % max_os) + 1]:
+                if (de, tp) in pv:
+                    mins_sem += mins
+                    break
+        lista_semanas.append(mins_sem)
+    return lista_semanas
+
+def calcular_indicadores_dia(dados, max_os):
+    regras_os = {os_n: [] for os_n in range(1, max_os + 1)}
+    for os_n in range(1, max_os + 1):
+        for x in [k for k in dados if k["OS"] == os_n]:
+            reg = x["Dias_Efet"]
+            if not reg:
+                continue
+            serv_txt = x["Serv"].upper()
+            estado = "DESCANSO" if "DESCANSO" in serv_txt else ("SUPRA" if "SUPRA" in serv_txt else "SERVICOS")
+            regras_os[os_n].append((expandir(reg), estado))
+    contagem = {d: {"SERVICOS": 0, "SUPRA": 0, "DESCANSO": 0} for d in range(1, 8)}
+    for d in range(1, 8):
+        for os_n in range(1, max_os + 1):
+            estado_encontrado = "DESCANSO"
+            for pv, est in regras_os[os_n]:
+                if (d, 'N') in pv:
+                    estado_encontrado = est
+                    break
+            contagem[d][estado_encontrado] += 1
+    return contagem
+
+def comboios(txt):
+    limpo = re.sub(r'\(.*?\)', '', str(txt))
+    limpo = re.sub(r'\b\d{2}/\d{2}/\d{4}\b', '', limpo)
+    return set(re.findall(r'\b\d{3,5}\b', limpo))
+
+def limpar_latin1(txt):
+    return str(txt).replace("•", "-").replace("→", "->").encode("latin-1", "replace").decode("latin-1")
+
+def auditar_linha_editada(serv_txt, base_cb, sede="COB"):
+    cbs = re.findall(r'\b\d{3,5}\b', re.sub(r'\(.*?\)', '', serv_txt))
+    cbs_conhecidos = [c for c in cbs if c in base_cb]
+    cbs_desconhecidos = [c for c in cbs if c not in base_cb]
+    alertas = []
+    if cbs_desconhecidos:
+        alertas.append(f"⚠️ Sem horário no comboios.csv: {', '.join(cbs_desconhecidos)}")
+
+    loc_apr, hora_apr, loc_ret, hora_ret, pnt_str = sede, "", sede, "", ""
+    if cbs_conhecidos:
+        primeiro, ultimo = base_cb[cbs_conhecidos[0]], base_cb[cbs_conhecidos[-1]]
+        loc_apr, loc_ret = primeiro["Origem"], ultimo["Destino"]
+        m_p, m_c = hora_para_min(primeiro["Partida"]), hora_para_min(ultimo["Chegada"])
+        if m_p is not None and m_c is not None:
+            ini_j = (m_p - 10) % (24 * 60)
+            fim_j = (m_c + 10) % (24 * 60)
+            hora_apr, hora_ret = min_para_hora(ini_j), min_para_hora(fim_j)
+            dur = (fim_j - ini_j) if fim_j >= ini_j else ((24 * 60 - ini_j) + fim_j)
+            pnt_str = f"{dur // 60:02d}:{dur % 60:02d}"
+            if dur < 6 * 60:
+                alertas.append(f"🔴 PNT abaixo do mínimo (06h00): {fmt_hm(dur)}")
+            elif dur > 9 * 60:
+                alertas.append(f"🔴 PNT acima do máximo (09h00): {fmt_hm(dur)}")
+
+    if "(TR)" in serv_txt.upper():
+        partes = re.split(r'\(TR\)', serv_txt, flags=re.IGNORECASE)
+        if len(partes) >= 2:
+            c_antes = re.findall(r'\b\d{3,5}\b', partes[0])
+            c_depois = re.findall(r'\b\d{3,5}\b', partes[1])
+            if c_antes and c_depois and c_antes[-1] in base_cb and c_depois[0] in base_cb:
+                h_cheg_antes = hora_para_min(base_cb[c_antes[-1]]["Chegada"])
+                h_part_depois = hora_para_min(base_cb[c_depois[0]]["Partida"])
+                if h_cheg_antes is not None and h_part_depois is not None:
+                    tr_mins = (h_part_depois - h_cheg_antes) if h_part_depois >= h_cheg_antes else ((24 * 60 - h_cheg_antes) + h_part_depois)
+                    if tr_mins < 45:
+                        alertas.append(f"🔴 Falta de (TR): {tr_mins}m (Mínimo obrigatório: 45m)")
+                    else:
+                        alertas.append(f"🟢 (TR) Válida: {tr_mins}m (>= 45m)")
+    return loc_apr, hora_apr, loc_ret, hora_ret, pnt_str, alertas
+
+def auditar_repousos_sequencia(linhas_simuladas, sede="COB"):
+    alertas_rep = []
+    os_ordenadas = sorted(linhas_simuladas, key=lambda r: (int(r["OS"]), str(r["Dias"])))
+    for i in range(len(os_ordenadas) - 1):
+        atual = os_ordenadas[i]
+        seguinte = os_ordenadas[i + 1]
+        if atual["OS"] == seguinte["OS"]:
+            continue
+        m_ret = hora_para_min(atual["HoraRet"])
+        m_apr = hora_para_min(seguinte["HoraApr"])
+        if m_ret is None or m_apr is None:
+            continue
+
+        descanso = (m_apr - m_ret) if m_apr >= m_ret else ((24 * 60 - m_ret) + m_apr)
+        local_desc = str(atual["LocalRet"]).strip().upper()
+        em_sede = (local_desc == sede.upper()) or bool(atual.get("RepSede", False))
+        min_exigido = 14 * 60 if em_sede else 9 * 60
+        tipo_local = "Sede (14h00)" if em_sede else "Fora da Sede (09h00)"
+
+        if descanso < min_exigido:
+            alertas_rep.append(
+                f"🔴 OS {atual['OS']:03d} → OS {seguinte['OS']:03d} ({local_desc}): "
+                f"Repouso insuficiente de {fmt_hm(descanso)} [Mín. {tipo_local}]"
+            )
+        else:
+            alertas_rep.append(
+                f"🟢 OS {atual['OS']:03d} → OS {seguinte['OS']:03d} ({local_desc}): "
+                f"Repouso válido de {fmt_hm(descanso)} [>= {tipo_local}]"
+            )
+    return alertas_rep
 class PDFComAssinatura(FPDF):
     def __init__(self, titulo_escala="COBR20", *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -282,14 +397,14 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
         y_ini = pdf.get_y()
         pdf.set_fill_color(*cor_rgb)
         pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(l_os, alt_linha, limpar_latin1(os_str), border=1, align="C", fill=True)
-        pdf.cell(l_os, alt_linha, limpar_latin1(tp), border=1, align="C", fill=True)
+        pdf.cell(l_os[0], alt_linha, limpar_latin1(os_str), border=1, align="C", fill=True)
+        pdf.cell(l_os[1], alt_linha, limpar_latin1(tp), border=1, align="C", fill=True)
         x_ta = pdf.get_x()
         pdf.set_font("Helvetica", "", 7.5)
-        pdf.multi_cell(l_os, alt_linha / linhas_max, limpar_latin1(ta), border=1, fill=True)
-        pdf.set_xy(x_ta + l_os, y_ini)
+        pdf.multi_cell(l_os[2], alt_linha / linhas_max, limpar_latin1(ta), border=1, fill=True)
+        pdf.set_xy(x_ta + l_os[2], y_ini)
         pdf.set_font("Helvetica", "B", 7.5)
-        pdf.multi_cell(l_os, alt_linha / linhas_max, limpar_latin1(tn), border=1, fill=True)
+        pdf.multi_cell(l_os[3], alt_linha / linhas_max, limpar_latin1(tn), border=1, fill=True)
         pdf.set_y(y_ini + alt_linha)
 
     if so_os:
@@ -324,9 +439,9 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
     for ind, qtd, obs, cor_rgb in balanco_rows:
         pdf.set_fill_color(*cor_rgb)
         pdf.set_font("Helvetica", "B", 8.5)
-        pdf.cell(l_bal, 7, limpar_latin1(ind), border=1, fill=True)
-        pdf.cell(l_bal, 7, limpar_latin1(qtd), border=1, align="C", fill=True)
-        pdf.cell(l_bal, 7, limpar_latin1(obs), border=1, fill=True)
+        pdf.cell(l_bal[0], 7, limpar_latin1(ind), border=1, fill=True)
+        pdf.cell(l_bal[1], 7, limpar_latin1(qtd), border=1, align="C", fill=True)
+        pdf.cell(l_bal[2], 7, limpar_latin1(obs), border=1, fill=True)
         pdf.ln()
 
     pdf.add_page()
@@ -334,7 +449,7 @@ def gerar_pdf_nativo(lista_os_alt, lista_cb_mov, lista_rep_alt, balanco_rows, di
     l_dist = (48, 52, 36, 52, 44, 44)
     cabecalho_tabela(["Dia da Semana", "Serviços (Ant -> Nov)", "Dif.", "SUPRA (Ant -> Nov)", "Descanso", "Total OS"], l_dist)
     for d_row in dist_rows:
-        pdf.set_fill_color(*d_row)
+        pdf.set_fill_color(*d_row[6])
         pdf.set_font("Helvetica", "B", 8.5)
         for idx_c in range(6):
             pdf.cell(l_dist[idx_c], 7, limpar_latin1(d_row[idx_c]), border=1, align=("L" if idx_c == 0 else "C"), fill=True)
@@ -383,11 +498,11 @@ def gerar_pdf_impacto_simulacao(linhas_comp, resumo_infracoes, titulo_esc="COBR2
     for os_s, orig_t, edit_t in linhas_comp:
         pdf.set_fill_color(198, 239, 206)
         pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(l_sim, 10, limpar_latin1(os_s), border=1, align="C", fill=True)
+        pdf.cell(l_sim[0], 10, limpar_latin1(os_s), border=1, align="C", fill=True)
         pdf.set_font("Helvetica", "", 7.5)
-        pdf.cell(l_sim, 10, limpar_latin1(orig_t[:85]), border=1, fill=True)
+        pdf.cell(l_sim[1], 10, limpar_latin1(orig_t[:85]), border=1, fill=True)
         pdf.set_font("Helvetica", "B", 7.5)
-        pdf.cell(l_sim, 10, limpar_latin1(edit_t[:85]), border=1, fill=True)
+        pdf.cell(l_sim[2], 10, limpar_latin1(edit_t[:85]), border=1, fill=True)
         pdf.ln()
     return bytes(pdf.output())
 
@@ -396,7 +511,7 @@ def converter_pdf_para_excel_validado(uploaded_pdf):
     todas_linhas = []
     data_vigor, num_alt, cod_esc = "22/11/2026", "ALTERAÇÃO", "ORV_CP"
     with pdfplumber.open(io.BytesIO(bytes_data)) as pdf:
-        txt_p1 = pdf.pages.extract_text() or ""
+        txt_p1 = pdf.pages[0].extract_text() or ""
         m_dt = re.search(r'\b(\d{2}/\d{2}/\d{4})\b', txt_p1)
         if m_dt: data_vigor = m_dt.group(1)
         m_al = re.search(r'(\d+ª\s+ALTERAÇÃO)', txt_p1)
@@ -433,4 +548,3 @@ def converter_pdf_para_excel_validado(uploaded_pdf):
         cell.font, cell.alignment, cell.border = fonte_bold, centro, borda_fina
 
     for rng in ("C1:E1", "C2:E2", "G1:K1", "G2:K2", "A4:A5", "B4:B5", "C4:D4", "E4:E5", "F4:G4", "H4:H5", "I4:J4", "K4:K5"):
-        ws.merge_cells(rng)
