@@ -373,37 +373,60 @@ def auditar_linha_editada(serv_txt, base_cb, sede="COB"):
                         alertas.append(f"🟢 (TR) Válida: {tr_mins}m (>= 45m)")
     return loc_apr, hora_apr, loc_ret, hora_ret, pnt_str, alertas
 
-def auditar_repousos_sequencia(linhas_simuladas, sede="COB"):
+def auditar_repousos_sequencia(linhas_simuladas, escala_completa, sede="COB"):
     alertas_rep = []
-    os_ordenadas = sorted(linhas_simuladas, key=lambda r: (int(r["OS"]), str(r["Dias"])))
-    for i in range(len(os_ordenadas) - 1):
-        atual = os_ordenadas[i]
-        seguinte = os_ordenadas[i + 1]
-        if atual["OS"] == seguinte["OS"]:
-            continue
+    sede_up = str(sede or "COB").strip().upper()
+    nome_dep_sede = DEPOSITOS_CP.get(sede_up, sede_up).upper()
+
+    sim_por_os = {}
+    for r in linhas_simuladas:
+        sim_por_os.setdefault(int(r["OS"]), []).append(r)
+
+    for atual in linhas_simuladas:
+        os_atual = int(atual["OS"])
+        os_seg = os_atual + 1
         m_ret = hora_para_min(atual["HoraRet"])
-        m_apr = hora_para_min(seguinte["HoraApr"])
-        if m_ret is None or m_apr is None:
+        if m_ret is None:
             continue
 
-        descanso = (m_apr - m_ret) if m_apr >= m_ret else ((24 * 60 - m_ret) + m_apr)
+        candidatas_seg = sim_por_os.get(os_seg) or [x for x in escala_completa if int(x["OS"]) == os_seg]
+        if not candidatas_seg:
+            continue
+
         local_desc = str(atual["LocalRet"]).strip().upper()
-        em_sede = (local_desc == sede.upper()) or bool(atual.get("RepSede", False))
+        em_sede = (
+            not local_desc
+            or local_desc == sede_up
+            or local_desc in nome_dep_sede
+            or (sede_up == "COB" and "COIMBRA" in local_desc)
+            or (sede_up == "PCA" and "PORTO" in local_desc)
+            or (sede_up in ("LSA", "LRO") and "LISBOA" in local_desc)
+        )
         min_exigido = 14 * 60 if em_sede else 9 * 60
         tipo_local = "Sede (14h00)" if em_sede else "Fora da Sede (09h00)"
 
-        if descanso < min_exigido:
-            alertas_rep.append(
-                f"🔴 OS {atual['OS']:03d} → OS {seguinte['OS']:03d} ({local_desc}): "
-                f"Repouso insuficiente de {fmt_hm(descanso)} [Mín. {tipo_local}]"
-            )
-        else:
-            alertas_rep.append(
-                f"🟢 OS {atual['OS']:03d} → OS {seguinte['OS']:03d} ({local_desc}): "
-                f"Repouso válido de {fmt_hm(descanso)} [>= {tipo_local}]"
-            )
+        for seg in candidatas_seg:
+            serv_seg = str(seg.get("Serv", "")).upper()
+            if "DESCANSO" in serv_seg:
+                continue
+            m_apr = hora_para_min(seg.get("HoraApr", ""))
+            if m_apr is None:
+                continue
+
+            descanso = (m_apr - m_ret) if m_apr > m_ret else ((24 * 60 - m_ret) + m_apr)
+            dias_info = f"[{atual['Dias']} → {seg.get('Dias', '')}]"
+
+            if descanso < min_exigido:
+                alertas_rep.append(
+                    f"🔴 OS {os_atual:03d} → OS {os_seg:03d} {dias_info} ({local_desc or sede_up}): "
+                    f"Repouso insuficiente de {fmt_hm(descanso)} [Mín. {tipo_local}]"
+                )
+            else:
+                alertas_rep.append(
+                    f"🟢 OS {os_atual:03d} → OS {os_seg:03d} {dias_info} ({local_desc or sede_up}): "
+                    f"Repouso válido de {fmt_hm(descanso)} [>= {tipo_local}]"
+                )
     return alertas_rep
-class PDFComAssinatura(FPDF):
     def __init__(self, titulo_escala="COBR20", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.titulo_escala = titulo_escala
