@@ -190,7 +190,7 @@ def ler_ficheiro_carregado(uploaded_file):
         if any(any("Dias da Semana" in c for c in l) for l in linhas):
             return processar_linhas_brutas(linhas), meta
     return [], meta
-def obter_total_os(dados):
+    def obter_total_os(dados):
     return max([x["OS"] for x in dados], default=120)
 
 def contar_repousos_escala(dados, max_os):
@@ -343,7 +343,7 @@ def auditar_repousos_sequencia(linhas_simuladas, sede="COB"):
                 f"Repouso válido de {fmt_hm(descanso)} [>= {tipo_local}]"
             )
     return alertas_rep
-class PDFComAssinatura(FPDF):
+    class PDFComAssinatura(FPDF):
     def __init__(self, titulo_escala="COBR20", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.titulo_escala = titulo_escala
