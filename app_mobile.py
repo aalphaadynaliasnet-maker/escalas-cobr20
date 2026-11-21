@@ -594,7 +594,7 @@ def converter_pdf_para_excel_validado(uploaded_pdf):
     lista_sf_pdf = []
 
     with pdfplumber.open(io.BytesIO(bytes_data)) as pdf:
-        txt_p1 = pdf.pages.extract_text() or ""
+        txt_p1 = pdf.pages[0].extract_text() or ""
         m_dt = re.search(r'\b(\d{2}/\d{2}/\d{4})\b', txt_p1)
         if m_dt: data_vigor = m_dt.group(1)
         m_al = re.search(r'(\d+ª\s+ALTERAÇÃO)', txt_p1)
