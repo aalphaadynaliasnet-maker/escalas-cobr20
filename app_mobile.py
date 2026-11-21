@@ -110,16 +110,20 @@ def extrair_horarios_de_pdf_cp(uploaded_pdf):
     with pdfplumber.open(io.BytesIO(uploaded_pdf.read())) as pdf:
         return extrair_marchas_livro_ip_cp(pdf)
 
-def processar_linhas_brutas(linhas):
+def processar_linhas_brutas(linhas, sede="COB"):
     dados, os_atual, dias_atual = [], None, ""
     col_os, col_dias, col_lapr, col_hapr, col_serv, col_lret, col_hret, col_pnt, col_reps, col_repf, col_obs = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
     lixo = ("EM VIGOR", "ALTERAÇÃO", "CATEGORIA", "DEPÓSITO", "Planeamento", "Versão electrónica", "F.500.02", "Revisão e Venda")
+    sede_up = str(sede or "COB").strip().upper()
+
     for r in linhas:
-        r = [re.sub(r'\s+', ' ', str(c)).strip() if c is not None else "" for c in r]
+        # Preserva espaços internos antes de limpar para distinguir "X " (S) de " X" (F)
+        r_raw = [str(c) if c is not None else "" for c in r]
+        r = [re.sub(r'\s+', ' ', c).strip() for c in r_raw]
         if not any(r) or any(p in " ".join(r) for p in lixo):
             continue
 
-        # 1. Deteta o cabeçalho principal (OS, Dias da Semana, Designação, PNT, REP)
+        # 1. Cabeçalho principal
         if any("Dias da Semana" in c for c in r):
             for idx, txt in enumerate(r):
                 if txt == "OS": col_os = idx
@@ -136,7 +140,7 @@ def processar_linhas_brutas(linhas):
             col_obs = col_repf + 1
             continue
 
-        # 2. Deteta a linha de subcabeçalho exata (Local | Hora | Local | Hora | S | F)
+        # 2. Subcabeçalho (Local | Hora | S | F)
         if "S" in r and "F" in r and ("Local" in r or "Hora" in r):
             for idx, txt in enumerate(r):
                 if txt == "S" and idx > col_pnt:
@@ -164,31 +168,56 @@ def processar_linhas_brutas(linhas):
             pnt = r[col_pnt] if len(r) > col_pnt else ""
             reps = r[col_reps] if len(r) > col_reps else ""
             repf = r[col_repf] if len(r) > col_repf else ""
-            obs = r[col_obs] if len(r) > col_obs else ""
 
-            # Fallback caso o pdfplumber tenha inserido uma coluna vazia entre PNT e S/F
-            if reps.lower() != "x" and repf.lower() != "x" and len(r) > col_pnt + 1:
-                zona_rep = [c.lower() for c in r[col_pnt + 1 : min(len(r), col_pnt + 5)]]
-                if "x" in zona_rep:
-                    pos_x = zona_rep.index("x")
-                    # Se houver dois slots antes de Obs: primeiro é S, segundo é F
-                    if pos_x == 0:
-                        reps = "x"
-                    elif pos_x == 1:
-                        # Verifica se o slot 0 era coluna fantasma vazia ou mesmo a coluna S
-                        if len(r) > col_pnt + 3 and r[col_pnt + 1] == "" and r[col_pnt + 3] == "":
-                            reps = "x"
+            # Junta tudo o que sobra à direita de col_repf como Observações reais
+            obs_partes = [c for c in r[col_repf + 1:] if c] if len(r) > col_repf + 1 else []
+            obs = " ".join(obs_partes).strip()
+
+            # Caso 1: "X" isolado caiu na coluna Obs (deslocamento do pdfplumber)
+            if obs.upper() == "X" or obs.upper().startswith("X "):
+                if obs.upper() == "X":
+                    obs = ""
+                else:
+                    obs = obs[2:].strip()
+                # Enquadra em S ou F conforme o Local de Retirada vs Sede
+                if lret.strip().upper() == sede_up or not lret.strip():
+                    reps = "X"
+                else:
+                    repf = "X"
+
+            # Caso 2: S e F vieram fundidos numa única célula (ex: "X   " ou "   X")
+            if col_reps < len(r_raw) and r[col_reps].upper() == "X" and repf.upper() != "X":
+                cel_bruta = r_raw[col_reps]
+                # Se tem espaços significativos antes do X ou LocalRet não é a Sede -> é RepFora
+                if cel_bruta.startswith("  ") or (lret.strip() and lret.strip().upper() != sede_up):
+                    reps = ""
+                    repf = "X"
+                else:
+                    reps = "X"
+                    repf = ""
+
+            # Caso 3: Nenhuma cruz detetada nos índices fixos, mas existe um "X" isolado após PNT
+            if reps.upper() != "X" and repf.upper() != "X" and len(r) > col_pnt + 1:
+                for idx_extra in range(col_pnt + 1, len(r)):
+                    if r[idx_extra].upper() == "X":
+                        if lret.strip().upper() == sede_up or not lret.strip():
+                            reps = "X"
                         else:
-                            repf = "x"
-                    elif pos_x >= 2:
-                        repf = "x"
+                            repf = "X"
+                        if obs.upper() == "X":
+                            obs = ""
+                        break
+
+            # Garantia final: "X" solto nunca fica nas Observações
+            if obs.upper() == "X":
+                obs = ""
 
             if c_dias or serv or pnt:
                 dados.append({
                     "OS": os_atual, "Dias": c_dias, "Dias_Efet": dias_atual,
                     "LocalApr": lapr, "HoraApr": hapr, "Serv": serv,
                     "LocalRet": lret, "HoraRet": hret, "PNT": pnt,
-                    "RepSede": reps.lower() == "x", "RepFora": repf.lower() == "x", "Obs": obs
+                    "RepSede": reps.upper() == "X", "RepFora": repf.upper() == "X", "Obs": obs
                 })
     return dados
 
