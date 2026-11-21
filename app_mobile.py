@@ -548,5 +548,5 @@ def converter_pdf_para_excel_validado(uploaded_pdf):
         cell.font, cell.alignment, cell.border = fonte_bold, centro, borda_fina
 
         for rng in ("C1:E1", "C2:E2", "G1:K1", "G2:K2", "A4:A5", "B4:B5", "C4:D4", "E4:E5", "F4:G4", "H4:H5", "I4:J4", "K4:K5"):
-        ws.merge_cells(rng)
+            ws.merge_cells(rng)
 
