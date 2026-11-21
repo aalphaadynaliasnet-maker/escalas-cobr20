@@ -110,116 +110,46 @@ def extrair_horarios_de_pdf_cp(uploaded_pdf):
     with pdfplumber.open(io.BytesIO(uploaded_pdf.read())) as pdf:
         return extrair_marchas_livro_ip_cp(pdf)
 
-def processar_linhas_brutas(linhas, sede="COB"):
-    dados, os_atual, dias_atual = [], None, ""
-    col_os, col_dias, col_lapr, col_hapr, col_serv, col_lret, col_hret, col_pnt, col_reps, col_repf, col_obs = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
-    lixo = ("EM VIGOR", "ALTERAÇÃO", "CATEGORIA", "DEPÓSITO", "Planeamento", "Versão electrónica", "F.500.02", "Revisão e Venda")
-    sede_up = str(sede or "COB").strip().upper()
+            # Função auxiliar para saber se o LocalRet pertence à Sede
+            lret_up = lret.strip().upper()
+            nome_dep_sede = DEPOSITOS_CP.get(sede_up, sede_up).upper()
+            eh_na_sede = (
+                not lret_up
+                or lret_up == sede_up
+                or lret_up in nome_dep_sede
+                or (sede_up == "COB" and "COIMBRA" in lret_up)
+                or (sede_up == "PCA" and "PORTO" in lret_up)
+                or (sede_up in ("LSA", "LRO") and "LISBOA" in lret_up)
+            )
 
-    for r in linhas:
-        # Preserva espaços internos antes de limpar para distinguir "X " (S) de " X" (F)
-        r_raw = [str(c) if c is not None else "" for c in r]
-        r = [re.sub(r'\s+', ' ', c).strip() for c in r_raw]
-        if not any(r) or any(p in " ".join(r) for p in lixo):
-            continue
-
-        # 1. Cabeçalho principal
-        if any("Dias da Semana" in c for c in r):
-            for idx, txt in enumerate(r):
-                if txt == "OS": col_os = idx
-                elif "Dias da Semana" in txt: col_dias = idx
-                elif "Designação" in txt: col_serv = idx
-                elif "PNT" in txt: col_pnt = idx
-                elif txt == "REP":
-                    col_reps = idx
-                    col_repf = idx + 1
-            col_lapr, col_hapr = col_dias + 1, col_dias + 2
-            col_lret, col_hret = max(0, col_pnt - 2), max(0, col_pnt - 1)
-            if "REP" not in r:
-                col_reps, col_repf = col_pnt + 1, col_pnt + 2
-            col_obs = col_repf + 1
-            continue
-
-        # 2. Subcabeçalho (Local | Hora | S | F)
-        if "S" in r and "F" in r and ("Local" in r or "Hora" in r):
-            for idx, txt in enumerate(r):
-                if txt == "S" and idx > col_pnt:
-                    col_reps = idx
-                elif txt == "F" and idx > col_reps:
-                    col_repf = idx
-                    col_obs = idx + 1
-            continue
-
-        if len(r) <= col_pnt:
-            continue
-        c_os = r[col_os]
-        if c_os.replace(".0", "").isdigit() and 1 <= int(float(c_os)) <= 365:
-            os_atual = int(float(c_os))
-        c_dias = r[col_dias]
-        if c_dias and "Dias" not in c_dias:
-            dias_atual = c_dias
-
-        if os_atual:
-            serv = r[col_serv] if len(r) > col_serv else ""
-            lapr = r[col_lapr] if len(r) > col_lapr else ""
-            hapr = r[col_hapr] if len(r) > col_hapr else ""
-            lret = r[col_lret] if len(r) > col_lret else ""
-            hret = r[col_hret] if len(r) > col_hret else ""
-            pnt = r[col_pnt] if len(r) > col_pnt else ""
-            reps = r[col_reps] if len(r) > col_reps else ""
-            repf = r[col_repf] if len(r) > col_repf else ""
-
-            # Junta tudo o que sobra à direita de col_repf como Observações reais
-            obs_partes = [c for c in r[col_repf + 1:] if c] if len(r) > col_repf + 1 else []
-            obs = " ".join(obs_partes).strip()
-
-            # Caso 1: "X" isolado caiu na coluna Obs (deslocamento do pdfplumber)
+            # Caso 1: "X" isolado caiu na coluna Obs
             if obs.upper() == "X" or obs.upper().startswith("X "):
-                if obs.upper() == "X":
-                    obs = ""
+                obs = "" if obs.upper() == "X" else obs[2:].strip()
+                if eh_na_sede:
+                    reps, repf = "X", ""
                 else:
-                    obs = obs[2:].strip()
-                # Enquadra em S ou F conforme o Local de Retirada vs Sede
-                if lret.strip().upper() == sede_up or not lret.strip():
-                    reps = "X"
-                else:
-                    repf = "X"
+                    reps, repf = "", "X"
 
-            # Caso 2: S e F vieram fundidos numa única célula (ex: "X   " ou "   X")
-            if col_reps < len(r_raw) and r[col_reps].upper() == "X" and repf.upper() != "X":
-                cel_bruta = r_raw[col_reps]
-                # Se tem espaços significativos antes do X ou LocalRet não é a Sede -> é RepFora
-                if cel_bruta.startswith("  ") or (lret.strip() and lret.strip().upper() != sede_up):
-                    reps = ""
-                    repf = "X"
+            # Caso 2: S e F vieram juntos ou deslocados
+            if reps.upper() == "X" or repf.upper() == "X":
+                if eh_na_sede:
+                    reps, repf = "X", ""
                 else:
-                    reps = "X"
-                    repf = ""
+                    reps, repf = "", "X"
 
-            # Caso 3: Nenhuma cruz detetada nos índices fixos, mas existe um "X" isolado após PNT
+            # Caso 3: Nenhuma cruz nos índices fixos, mas existe um "X" isolado após PNT
             if reps.upper() != "X" and repf.upper() != "X" and len(r) > col_pnt + 1:
                 for idx_extra in range(col_pnt + 1, len(r)):
                     if r[idx_extra].upper() == "X":
-                        if lret.strip().upper() == sede_up or not lret.strip():
-                            reps = "X"
+                        if eh_na_sede:
+                            reps, repf = "X", ""
                         else:
-                            repf = "X"
-                        if obs.upper() == "X":
-                            obs = ""
+                            reps, repf = "", "X"
                         break
 
             # Garantia final: "X" solto nunca fica nas Observações
             if obs.upper() == "X":
                 obs = ""
-
-            if c_dias or serv or pnt:
-                dados.append({
-                    "OS": os_atual, "Dias": c_dias, "Dias_Efet": dias_atual,
-                    "LocalApr": lapr, "HoraApr": hapr, "Serv": serv,
-                    "LocalRet": lret, "HoraRet": hret, "PNT": pnt,
-                    "RepSede": reps.upper() == "X", "RepFora": repf.upper() == "X", "Obs": obs
-                })
-    return dados
 
 def identificar_deposito(texto, sede_sigla):
     t_up = texto.upper()
