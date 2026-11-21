@@ -587,6 +587,134 @@ def extrair_repousos_por_coordenada_pdf(pdf_obj):
                 tipo = "S" if cx <= meio_sf else "F"
                 mapa_sf[(p_idx, round(w["top"] / 4.0))] = tipo
     return mapa_sf
+def converter_pdf_para_excel_validado(uploaded_pdf):
+    bytes_data = uploaded_pdf.read()
+    todas_linhas = []
+    data_vigor, num_alt, cod_esc = "22/11/2026", "ALTERAÇÃO", "ORV_CP"
+    lista_sf_pdf = []
+
+    with pdfplumber.open(io.BytesIO(bytes_data)) as pdf:
+        txt_p1 = pdf.pages.extract_text() or ""
+        m_dt = re.search(r'\b(\d{2}/\d{2}/\d{4})\b', txt_p1)
+        if m_dt: data_vigor = m_dt.group(1)
+        m_al = re.search(r'(\d+ª\s+ALTERAÇÃO)', txt_p1)
+        if m_al: num_alt = m_al.group(1)
+        m_es = re.search(r'\b([A-Z]{3}R\d{2})\b', txt_p1)
+        if m_es: cod_esc = m_es.group(1)
+
+        for pag in pdf.pages:
+            palavras = pag.extract_words() or []
+            x_s, x_f = None, None
+            for w in palavras:
+                t = w["text"].strip()
+                if t == "S" and w["top"] < 180 and w["x0"] > 450:
+                    x_s = (w["x0"] + w["x1"]) / 2.0
+                elif t == "F" and w["top"] < 180 and w["x0"] > 450:
+                    x_f = (w["x0"] + w["x1"]) / 2.0
+            if x_s is not None and x_f is not None:
+                meio_sf = (x_s + x_f) / 2.0
+                cruzes_pag = [
+                    w for w in palavras
+                    if w["text"].strip().upper() == "X" and (x_s - 20) <= w["x0"] <= (x_f + 20) and w["top"] > 120
+                ]
+                cruzes_pag.sort(key=lambda item: item["top"])
+                for w in cruzes_pag:
+                    cx = (w["x0"] + w["x1"]) / 2.0
+                    lista_sf_pdf.append("S" if cx <= meio_sf else "F")
+
+            for tabela in pag.extract_tables():
+                todas_linhas.extend(tabela)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = cod_esc
+    verde_cp = PatternFill("solid", fgColor="1B4F3E")
+    fonte_branca = Font(name="Calibri", size=9, bold=True, color="FFFFFF")
+    fonte_bold = Font(name="Calibri", size=9, bold=True, color="000000")
+    fonte_norm = Font(name="Calibri", size=9, bold=False, color="000000")
+    borda_fina = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
+    centro = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    esq = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    ws.append(["EM VIGOR DESDE", "CATEGORIA", "", f"{num_alt} EM VIGOR A PARTIR DE:", "", "ESCALA", "DEPÓSITO DE REVISÃO", "", "", "", ""])
+    ws.append(["31/05/2020", "Operador de Revisão e Venda", "", data_vigor, "", cod_esc, "NACIONAL CP", "", "", "", ""])
+    ws.append([""] * 11)
+    ws.append(["OS", "Dias da Semana", "Apresentação", "", "Designação dos Serviços", "Ret. Prevista", "", "PNT", "REP", "", "Obs"])
+    ws.append(["", "", "Local", "Hora", "", "Local", "Hora", "", "S", "F", ""])
+
+    for r_idx in (1, 4, 5):
+        for c_idx in range(1, 12):
+            cell = ws.cell(row=r_idx, column=c_idx)
+            cell.fill, cell.font, cell.alignment, cell.border = verde_cp, fonte_branca, centro, borda_fina
+    for c_idx in range(1, 12):
+        cell = ws.cell(row=2, column=c_idx)
+        cell.font, cell.alignment, cell.border = fonte_bold, centro, borda_fina
+
+    for rng in ("C1:E1", "C2:E2", "G1:K1", "G2:K2", "A4:A5", "B4:B5", "C4:D4", "E4:E5", "F4:G4", "H4:H5", "I4:J4", "K4:K5"):
+        ws.merge_cells(rng)
+
+    sede_conv = cod_esc[:3] if len(cod_esc) >= 3 else "COB"
+    dados_extraidos = processar_linhas_brutas(todas_linhas, sede=sede_conv)
+    os_encontradas, os_atual, inicio_os_row = set(), None, None
+    idx_cruz = 0
+
+    for item in dados_extraidos:
+        os_num = item["OS"]
+        if os_num != os_atual:
+            if os_atual and inicio_os_row and ws.max_row > inicio_os_row:
+                ws.merge_cells(start_row=inicio_os_row, start_column=1, end_row=ws.max_row, end_column=1)
+            os_atual = os_num
+            os_encontradas.add(os_atual)
+            col_os_val = os_atual
+            inicio_os_row = ws.max_row + 1
+        else:
+            col_os_val = ""
+
+        tem_rep = item["RepSede"] or item["RepFora"]
+        if tem_rep and idx_cruz < len(lista_sf_pdf):
+            tipo_sf = lista_sf_pdf[idx_cruz]
+            idx_cruz += 1
+            rep_s_val = "X" if tipo_sf == "S" else ""
+            rep_f_val = "X" if tipo_sf == "F" else ""
+        else:
+            rep_s_val = "X" if item["RepSede"] else ""
+            rep_f_val = "X" if item["RepFora"] else ""
+
+        linha_11 = [
+            col_os_val,
+            item["Dias"],
+            item["LocalApr"],
+            item["HoraApr"],
+            item["Serv"],
+            item["LocalRet"],
+            item["HoraRet"],
+            item["PNT"],
+            rep_s_val,
+            rep_f_val,
+            item["Obs"]
+        ]
+
+        ws.append(linha_11)
+        row_num = ws.max_row
+        for c_idx in range(1, 12):
+            cell = ws.cell(row=row_num, column=c_idx)
+            cell.border = borda_fina
+            cell.font = fonte_bold if c_idx == 1 else fonte_norm
+            cell.alignment = esq if c_idx in (5, 11) else centro
+
+    if os_atual and inicio_os_row and ws.max_row > inicio_os_row:
+        ws.merge_cells(start_row=inicio_os_row, start_column=1, end_row=ws.max_row, end_column=1)
+
+    larguras = (6, 16, 10, 8, 42, 10, 8, 8, 5, 5, 22)
+    for idx_col, larg in enumerate(larguras, start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(idx_col)].width = larg
+
+    tot_esp = max(os_encontradas, default=120)
+    em_falta = sorted(set(range(1, tot_esp + 1)) - os_encontradas)
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue(), len(os_encontradas), tot_esp, em_falta
+    
 def aplicar_visual_cp(img_path="alfa-pendular-wext3_856.jpg"):
     bg_css = ""
     try:
