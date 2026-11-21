@@ -548,27 +548,36 @@ def converter_pdf_para_excel_validado(uploaded_pdf):
         cell.font, cell.alignment, cell.border = fonte_bold, centro, borda_fina
 
     for rng in ("C1:E1", "C2:E2", "G1:K1", "G2:K2", "A4:A5", "B4:B5", "C4:D4", "E4:E5", "F4:G4", "H4:H5", "I4:J4", "K4:K5"):
-            ws.merge_cells(rng)
-    lixo = ("EM VIGOR", "ALTERAÇÃO", "CATEGORIA", "DEPÓSITO", "Planeamento", "Versão electrónica", "F.500.02", "Revisão e Venda", "Local", "Hora", "Dias da Semana")
+        ws.merge_cells(rng)
+
+    dados_extraidos = processar_linhas_brutas(todas_linhas)
     os_encontradas, os_atual, inicio_os_row = set(), None, None
 
-    for r in todas_linhas:
-        r = [re.sub(r'\s+', ' ', str(c)).strip() if c is not None else "" for c in r]
-        if not any(r) or any(p in " ".join(r) for p in lixo) or len(r) < 10:
-            continue
-        linha_11 = (r + [""] * 11)[:11]
-        c_os = linha_11[0]
-        if c_os.isdigit() and 1 <= int(c_os) <= 365:
+    for item in dados_extraidos:
+        os_num = item["OS"]
+        if os_num != os_atual:
             if os_atual and inicio_os_row and ws.max_row > inicio_os_row:
                 ws.merge_cells(start_row=inicio_os_row, start_column=1, end_row=ws.max_row, end_column=1)
-            os_atual = int(c_os)
+            os_atual = os_num
             os_encontradas.add(os_atual)
-            linha_11[0] = os_atual
+            col_os_val = os_atual
             inicio_os_row = ws.max_row + 1
-        elif os_atual:
-            linha_11[0] = ""
         else:
-            continue
+            col_os_val = ""
+
+        linha_11 = [
+            col_os_val,
+            item["Dias"],
+            item["LocalApr"],
+            item["HoraApr"],
+            item["Serv"],
+            item["LocalRet"],
+            item["HoraRet"],
+            item["PNT"],
+            "X" if item["RepSede"] else "",
+            "X" if item["RepFora"] else "",
+            item["Obs"]
+        ]
 
         ws.append(linha_11)
         row_num = ws.max_row
