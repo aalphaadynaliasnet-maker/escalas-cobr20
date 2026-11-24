@@ -373,60 +373,122 @@ def auditar_linha_editada(serv_txt, base_cb, sede="COB"):
                         alertas.append(f"🟢 (TR) Válida: {tr_mins}m (>= 45m)")
     return loc_apr, hora_apr, loc_ret, hora_ret, pnt_str, alertas
 
-def auditar_repousos_sequencia(linhas_simuladas, escala_completa, sede="COB"):
-    alertas_rep = []
+def dias_ativos_linha(regra_dias):
+    """Devolve o conjunto de dias da semana (1=Dom .. 7=Sáb) em que a linha se realiza."""
+    pares = expandir(regra_dias)
+    if pares:
+        return sorted(set(d for d, _ in pares))
+    # Fallback se o texto tiver dígitos soltos (ex: "1", "2..6")
+    dias = set()
+    for token in re.findall(r'\d+(?:\.\.\d+)?', str(regra_dias)):
+        if '..' in token:
+            a, b = map(int, token.split('..'))
+            dias.update(range(a, b + 1))
+        else:
+            dias.add(int(token))
+    return sorted(d for d in dias if 1 <= d <= 7)
+
+def eh_local_sede(local_str, sede_up):
+    loc = str(local_str or "").strip().upper()
+    nome_dep = DEPOSITOS_CP.get(sede_up, sede_up).upper()
+    return (
+        not loc
+        or loc == sede_up
+        or loc in nome_dep
+        or (sede_up == "COB" and "COIMBRA" in loc)
+        or (sede_up == "PCA" and "PORTO" in loc)
+        or (sede_up in ("LSA", "LRO") and "LISBOA" in loc)
+    )
+
+def auditar_rotacao_bidirecional(linhas_marcadas, escala_completa, sede="COB"):
+    """Audita APENAS as linhas com visto Simular contra a OS anterior (entrada) e OS seguinte (saída) nos dias exatos."""
+    alertas = []
     sede_up = str(sede or "COB").strip().upper()
-    nome_dep_sede = DEPOSITOS_CP.get(sede_up, sede_up).upper()
+    nomes_dia = {1: "Dom", 2: "2ªf", 3: "3ªf", 4: "4ªf", 5: "5ªf", 6: "6ªf", 7: "Sáb"}
+    max_os = obter_total_os(escala_completa)
 
-    sim_por_os = {}
-    for r in linhas_simuladas:
-        sim_por_os.setdefault(int(r["OS"]), []).append(r)
+    # Mapa atualizado com as linhas editadas para refletir alterações encadeadas
+    escala_sim = [dict(x) for x in escala_completa]
+    for m in linhas_marcadas:
+        for item in escala_sim:
+            if int(item["OS"]) == int(m["OS"]) and str(item["Dias"]).strip() == str(m["Dias"]).strip():
+                item.update(m)
 
-    for atual in linhas_simuladas:
+    for atual in linhas_marcadas:
         os_atual = int(atual["OS"])
-        os_seg = os_atual + 1
-        m_ret = hora_para_min(atual["HoraRet"])
-        if m_ret is None:
-            continue
+        os_ant = max_os if os_atual == 1 else os_atual - 1
+        os_seg = 1 if os_atual == max_os else os_atual + 1
 
-        candidatas_seg = sim_por_os.get(os_seg) or [x for x in escala_completa if int(x["OS"]) == os_seg]
-        if not candidatas_seg:
-            continue
+        m_apr_atual = hora_para_min(atual["HoraApr"])
+        m_ret_atual = hora_para_min(atual["HoraRet"])
+        dias_hoje = dias_ativos_linha(atual["Dias"])
 
-        local_desc = str(atual["LocalRet"]).strip().upper()
-        em_sede = (
-            not local_desc
-            or local_desc == sede_up
-            or local_desc in nome_dep_sede
-            or (sede_up == "COB" and "COIMBRA" in local_desc)
-            or (sede_up == "PCA" and "PORTO" in local_desc)
-            or (sede_up in ("LSA", "LRO") and "LISBOA" in local_desc)
-        )
-        min_exigido = 14 * 60 if em_sede else 9 * 60
-        tipo_local = "Sede (14h00)" if em_sede else "Fora da Sede (09h00)"
+        if not dias_hoje:
+            dias_hoje = [0]
 
-        for seg in candidatas_seg:
-            serv_seg = str(seg.get("Serv", "")).upper()
-            if "DESCANSO" in serv_seg:
-                continue
-            m_apr = hora_para_min(seg.get("HoraApr", ""))
-            if m_apr is None:
-                continue
+        for d_hoje in dias_hoje:
+            d_ontem = 7 if d_hoje == 1 else (d_hoje - 1 if d_hoje > 1 else 0)
+            d_amanha = 1 if d_hoje == 7 else (d_hoje + 1 if d_hoje > 0 else 0)
+            tag_dia = f" ({nomes_dia[d_hoje]})" if d_hoje in nomes_dia else ""
 
-            descanso = (m_apr - m_ret) if m_apr > m_ret else ((24 * 60 - m_ret) + m_apr)
-            dias_info = f"[{atual['Dias']} → {seg.get('Dias', '')}]"
+            # --- 1. VERIFICAR ENTRADA: OS ANTERIOR (ontem) -> OS EDITADA (hoje) ---
+            if m_apr_atual is not None:
+                for cand_ant in [x for x in escala_sim if int(x["OS"]) == os_ant]:
+                    if "DESCANSO" in str(cand_ant.get("Serv", "")).upper():
+                        continue
+                    dias_cand_ant = dias_ativos_linha(cand_ant.get("Dias_Efet") or cand_ant.get("Dias", ""))
+                    if d_ontem != 0 and dias_cand_ant and d_ontem not in dias_cand_ant:
+                        continue
+                    m_ret_ant = hora_para_min(cand_ant.get("HoraRet", ""))
+                    if m_ret_ant is None:
+                        continue
 
-            if descanso < min_exigido:
-                alertas_rep.append(
-                    f"🔴 OS {os_atual:03d} → OS {os_seg:03d} {dias_info} ({local_desc or sede_up}): "
-                    f"Repouso insuficiente de {fmt_hm(descanso)} [Mín. {tipo_local}]"
-                )
-            else:
-                alertas_rep.append(
-                    f"🟢 OS {os_atual:03d} → OS {os_seg:03d} {dias_info} ({local_desc or sede_up}): "
-                    f"Repouso válido de {fmt_hm(descanso)} [>= {tipo_local}]"
-                )
-    return alertas_rep
+                    desc_entrada = (m_apr_atual - m_ret_ant) if m_apr_atual > m_ret_ant else ((24 * 60 - m_ret_ant) + m_apr_atual)
+                    loc_rep_ant = cand_ant.get("LocalRet") or atual.get("LocalApr") or sede_up
+                    em_sede_ent = eh_local_sede(loc_rep_ant, sede_up)
+                    min_ent = 14 * 60 if em_sede_ent else 9 * 60
+                    lbl_ent = "Sede 14h00" if em_sede_ent else "Fora 09h00"
+
+                    if desc_entrada < min_ent:
+                        alertas.append(
+                            f"🔴 [ENTRADA{tag_dia}] OS {os_ant:03d} → OS {os_atual:03d} ({loc_rep_ant}): "
+                            f"Repouso insuficiente de {fmt_hm(desc_entrada)} [Mín. {lbl_ent}]"
+                        )
+                    else:
+                        alertas.append(
+                            f"🟢 [ENTRADA{tag_dia}] OS {os_ant:03d} → OS {os_atual:03d} ({loc_rep_ant}): "
+                            f"Repouso válido de {fmt_hm(desc_entrada)} [>= {lbl_ent}]"
+                        )
+
+            # --- 2. VERIFICAR SAÍDA: OS EDITADA (hoje) -> OS SEGUINTE (amanhã) ---
+            if m_ret_atual is not None:
+                for cand_seg in [x for x in escala_sim if int(x["OS"]) == os_seg]:
+                    if "DESCANSO" in str(cand_seg.get("Serv", "")).upper():
+                        continue
+                    dias_cand_seg = dias_ativos_linha(cand_seg.get("Dias_Efet") or cand_seg.get("Dias", ""))
+                    if d_amanha != 0 and dias_cand_seg and d_amanha not in dias_cand_seg:
+                        continue
+                    m_apr_seg = hora_para_min(cand_seg.get("HoraApr", ""))
+                    if m_apr_seg is None:
+                        continue
+
+                    desc_saida = (m_apr_seg - m_ret_atual) if m_apr_seg > m_ret_atual else ((24 * 60 - m_ret_atual) + m_apr_seg)
+                    loc_rep_sai = atual.get("LocalRet") or sede_up
+                    em_sede_sai = eh_local_sede(loc_rep_sai, sede_up)
+                    min_sai = 14 * 60 if em_sede_sai else 9 * 60
+                    lbl_sai = "Sede 14h00" if em_sede_sai else "Fora 09h00"
+
+                    if desc_saida < min_sai:
+                        alertas.append(
+                            f"🔴 [SAÍDA{tag_dia}] OS {os_atual:03d} → OS {os_seg:03d} ({loc_rep_sai}): "
+                            f"Repouso insuficiente de {fmt_hm(desc_saida)} [Mín. {lbl_sai}]"
+                        )
+                    else:
+                        alertas.append(
+                            f"🟢 [SAÍDA{tag_dia}] OS {os_atual:03d} → OS {os_seg:03d} ({loc_rep_sai}): "
+                            f"Repouso válido de {fmt_hm(desc_saida)} [>= {lbl_sai}]"
+                        )
+    return alertas
     def __init__(self, titulo_escala="COBR20", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.titulo_escala = titulo_escala
