@@ -1066,7 +1066,7 @@ with aba_edit:
             col_b1, col_b2 = st.columns((1, 1))
             recalc_auto = col_b2.checkbox("Recalcular horários via comboios.csv", value=True)
 
-                        if col_b1.button("🧪 Simular e Auditar Linhas Selecionadas", type="primary", use_container_width=True):
+                if col_b1.button("🧪 Simular e Auditar Linhas Selecionadas", type="primary", use_container_width=True):
                 df_selecionadas = df_editado[df_editado["Simular"] == True].copy()
 
                 if df_selecionadas.empty:
