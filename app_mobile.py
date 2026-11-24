@@ -1066,7 +1066,7 @@ with aba_edit:
             col_b1, col_b2 = st.columns((1, 1))
             recalc_auto = col_b2.checkbox("Recalcular horários via comboios.csv", value=True)
 
-            if col_b1.button("🧪 Simular e Auditar Linhas Selecionadas", type="primary", use_container_width=True):
+                        if col_b1.button("🧪 Simular e Auditar Linhas Selecionadas", type="primary", use_container_width=True):
                 df_selecionadas = df_editado[df_editado["Simular"] == True].copy()
 
                 if df_selecionadas.empty:
@@ -1074,58 +1074,8 @@ with aba_edit:
                 else:
                     infracoes_totais = []
                     linhas_comp_pdf = []
-                    linhas_para_repouso = []
-
-                    for idx, row in df_selecionadas.iterrows():
-                        os_num = int(row["OS"])
-                        serv_txt = str(row["Serv"]).strip()
-                        dias_txt = str(row["Dias"]).strip()
-
-                        loc_a, hora_a, loc_r, hora_r, pnt_calc, alertas_linha = auditar_linha_editada(
-                            serv_txt, st.session_state["base_comboios"], sede=sede_sim
-                        )
-
-                        if not recalc_auto or not hora_a:
-                            loc_a = str(row["LocalApr"]).strip() or loc_a
-                            hora_a = str(row["HoraApr"]).strip() or hora_a
-                            loc_r = str(row["LocalRet"]).strip() or loc_r
-                            hora_r = str(row["HoraRet"]).strip() or hora_r
-                            pnt_calc = str(row["PNT"]).strip() or pnt_calc
-
-                        ma, mr = hora_para_min(hora_a), hora_para_min(hora_r)
-                        if ma is not None and mr is not None and not recalc_auto:
-                            dur_m = (mr - ma) if mr >= ma else ((24 * 60 - ma) + mr)
-                            pnt_calc = f"{dur_m // 60:02d}:{dur_m % 60:02d}"
-                            if dur_m < 6 * 60:
-                                alertas_linha.append(f"🔴 PNT abaixo do mínimo (06h00): {fmt_hm(dur_m)}")
-                            elif dur_m > 9 * 60:
-                                alertas_linha.append(f"🔴 PNT acima do máximo (09h00): {fmt_hm(dur_m)}")
-
-                        for al in alertas_linha:
-                            infracoes_totais.append(f"OS {os_num:03d} [{dias_txt}]: {al}")
-
-                        linhas_para_repouso.append({
-                            "OS": os_num,
-                            "Dias": dias_txt,
-                            "LocalApr": loc_a,
-                            "HoraApr": hora_a,
-                            "LocalRet": loc_r,
-                            "HoraRet": hora_r,
-                            "RepFora": bool(row["RepFora"])
-                        })
-
-                        orig_match = next((o for o in linhas_orig if o["OS"] == os_num and o["Dias"] == dias_txt), None)
-                        txt_orig = f"[{orig_match['Dias']}] {orig_match['HoraApr']}-{orig_match['HoraRet']} | {orig_match['Serv']} ({orig_match['PNT']})" if orig_match else "Nova linha simulada"
-                        txt_edit = f"[{dias_txt}] {hora_a}-{hora_r} | {serv_txt} ({pnt_calc})"
-                        linhas_comp_pdf.append((f"OS {os_num:03d}", txt_orig, txt_edit))
-
-                    alertas_descanso = auditar_repousos_sequencia(linhas_para_repouso, d_sim, sede=sede_sim)
-                    infracoes_totais.extend(alertas_descanso)
-
-                    st.subheader("📋 Resultado da Auditoria (Linhas Marcadas)")
-                    infracoes_totais = []
-                    linhas_comp_pdf = []
-                    linhas_para_repouso = []
+                    linhas_para_auditar = []
+                    resumo_diff_horas = []
 
                     for idx, row in df_selecionadas.iterrows():
                         os_num = int(row["OS"])
@@ -1157,26 +1107,48 @@ with aba_edit:
                         for al in alertas_linha:
                             infracoes_totais.append(f"OS {os_num:03d} [{dias_txt}]: {al}")
 
-                        linhas_para_repouso.append({
+                        # Comparação Antes vs Depois apenas desta linha/dia editado
+                        orig_match = next((o for o in linhas_orig if int(o["OS"]) == os_num and str(o["Dias"]).strip() == dias_txt), None)
+                        pnt_orig_str = orig_match["PNT"] if orig_match else "00:00"
+                        m_orig = hora_para_min(pnt_orig_str) or 0
+                        m_novo = hora_para_min(pnt_calc) or 0
+                        dif_mins = m_novo - m_orig
+
+                        resumo_diff_horas.append({
+                            "OS": f"OS {os_num:03d}",
+                            "Dias": dias_txt,
+                            "Horário Antes": f"{orig_match['HoraApr']} → {orig_match['HoraRet']}" if orig_match else "-",
+                            "Horário Depois": f"{hora_a} → {hora_r}",
+                            "PNT Antes": pnt_orig_str[:5],
+                            "PNT Depois": pnt_calc[:5],
+                            "Diferença": fmt_hm(dif_mins, com_sinal=True)
+                        })
+
+                        linhas_para_auditar.append({
                             "OS": os_num,
                             "Dias": dias_txt,
+                            "Dias_Efet": dias_txt,
                             "LocalApr": loc_a,
                             "HoraApr": hora_a,
+                            "Serv": serv_txt,
                             "LocalRet": loc_r,
                             "HoraRet": hora_r,
                             "PNT": pnt_calc,
                             "RepFora": bool(row["RepFora"])
                         })
 
-                        orig_match = next((o for o in linhas_orig if o["OS"] == os_num and o["Dias"] == dias_txt), None)
                         txt_orig = f"[{orig_match['Dias']}] {orig_match['HoraApr']}-{orig_match['HoraRet']} | {orig_match['Serv']} ({orig_match['PNT']})" if orig_match else "Nova linha simulada"
                         txt_edit = f"[{dias_txt}] {hora_a}-{hora_r} | {serv_txt} ({pnt_calc})"
-                        linhas_comp_pdf.append((f"OS {os_num:03d}", txt_orig, txt_edit))
+                        linhas_comp_pdf.append((f"OS {os_num:03d} ({dias_txt})", txt_orig, txt_edit))
 
-                    alertas_descanso = auditar_repousos_sequencia(linhas_para_repouso, d_sim, sede=sede_sim)
+                    # Audita ENTRADA (OS anterior) e SAÍDA (OS seguinte) apenas para os dias da linha marcada
+                    alertas_descanso = auditar_rotacao_bidirecional(linhas_para_auditar, d_sim, sede=sede_sim)
                     infracoes_totais.extend(alertas_descanso)
 
-                    st.subheader("📋 Resultado da Auditoria (Linhas Marcadas)")
+                    st.subheader("📊 Comparação Antes vs. Depois (Apenas Linhas Marcadas)")
+                    st.dataframe(pd.DataFrame(resumo_diff_horas), use_container_width=True, hide_index=True)
+
+                    st.subheader("📋 Auditoria de Regras (Entrada, Turno e Saída)")
                     if not infracoes_totais:
                         st.success("✅ Nenhuma infração detetada nas linhas selecionadas!")
                     else:
@@ -1187,9 +1159,6 @@ with aba_edit:
                                 st.warning(item)
                             else:
                                 st.success(item)
-
-                    df_resumo_sim = pd.DataFrame(linhas_para_repouso)
-                    st.dataframe(df_resumo_sim, use_container_width=True, hide_index=True)
 
                     pdf_sim_bytes = gerar_pdf_impacto_simulacao(
                         linhas_comp_pdf,
