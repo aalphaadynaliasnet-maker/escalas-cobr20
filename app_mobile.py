@@ -118,7 +118,7 @@ def processar_linhas_brutas(linhas, sede="COB"):
         "Planeamento", "Versão electrónica", "F.500.02", "Revisão e Venda",
         "Regime de frequência", "alterações nas circulações", "Ordem de Serviço/Regime", "dem de Serviço"
     )
-
+    sede_up = str(sede or "COB").strip().upper()
     for r in linhas:
         r_raw = [str(c) if c is not None else "" for c in r]
         r = [re.sub(r'\s+', ' ', c).strip() for c in r_raw]
