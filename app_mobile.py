@@ -1063,7 +1063,7 @@ with aba_edit:
                 key="editor_os_sim"
             )
 
-                        col_b1, col_b2 = st.columns((1, 1))
+            col_b1, col_b2 = st.columns((1, 1))
             recalc_auto = col_b2.checkbox("Recalcular horários via comboios.csv (ao mudar comboios)", value=False)
 
             if col_b1.button("🧪 Simular e Auditar Linhas Selecionadas", type="primary", use_container_width=True):
