@@ -1066,10 +1066,10 @@ with aba_edit:
             col_b1, col_b2 = st.columns((1, 1))
             recalc_auto = col_b2.checkbox("Recalcular horários via comboios.csv", value=True)
 
-                if col_b1.button("🧪 Simular e Auditar Linhas Selecionadas", type="primary", use_container_width=True):
+         if col_b1.button("🧪 Simular e Auditar Linhas Selecionadas", type="primary", use_container_width=True):
                 df_selecionadas = df_editado[df_editado["Simular"] == True].copy()
 
-                if df_selecionadas.empty:
+        if df_selecionadas.empty:
                     st.warning("⚠️ Marca pelo menos uma linha com o visto **Simular** para correr a auditoria.")
                 else:
                     infracoes_totais = []
@@ -1086,7 +1086,7 @@ with aba_edit:
                             serv_txt, st.session_state["base_comboios"], sede=sede_sim
                         )
 
-                        if not recalc_auto or not hora_a:
+            if not recalc_auto or not hora_a:
                             alertas_linha = [a for a in alertas_linha if "PNT" not in a]
                             loc_a = str(row["LocalApr"]).strip() or loc_a
                             hora_a = str(row["HoraApr"]).strip() or hora_a
@@ -1094,10 +1094,10 @@ with aba_edit:
                             hora_r = str(row["HoraRet"]).strip() or hora_r
 
                             ma, mr = hora_para_min(hora_a), hora_para_min(hora_r)
-                            if ma is not None and mr is not None:
+            if ma is not None and mr is not None:
                                 dur_m = (mr - ma) if mr >= ma else ((24 * 60 - ma) + mr)
                                 pnt_calc = f"{dur_m // 60:02d}:{dur_m % 60:02d}"
-                                if dur_m < 6 * 60:
+            if dur_m < 6 * 60:
                                     alertas_linha.append(f"🔴 PNT abaixo do mínimo (06h00): {fmt_hm(dur_m)}")
                                 elif dur_m > 9 * 60:
                                     alertas_linha.append(f"🔴 PNT acima do máximo (09h00): {fmt_hm(dur_m)}")
@@ -1149,11 +1149,11 @@ with aba_edit:
                     st.dataframe(pd.DataFrame(resumo_diff_horas), use_container_width=True, hide_index=True)
 
                     st.subheader("📋 Auditoria de Regras (Entrada, Turno e Saída)")
-                    if not infracoes_totais:
+            if not infracoes_totais:
                         st.success("✅ Nenhuma infração detetada nas linhas selecionadas!")
                     else:
                         for item in infracoes_totais:
-                            if item.startswith("🔴"):
+            if item.startswith("🔴"):
                                 st.error(item)
                             elif item.startswith("⚠️"):
                                 st.warning(item)
