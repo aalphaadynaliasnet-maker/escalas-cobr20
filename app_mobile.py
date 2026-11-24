@@ -113,7 +113,7 @@ def extrair_horarios_de_pdf_cp(uploaded_pdf):
 def processar_linhas_brutas(linhas, sede="COB"):
     dados, os_atual, dias_atual = [], None, ""
     col_os, col_dias, col_lapr, col_hapr, col_serv, col_lret, col_hret, col_pnt, col_reps, col_repf, col_obs = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
-        lixo = (
+    lixo = (
         "EM VIGOR", "ALTERAÇÃO", "CATEGORIA", "DEPÓSITO",
         "Planeamento", "Versão electrónica", "F.500.02", "Revisão e Venda",
         "Regime de frequência", "alterações nas circulações", "Ordem de Serviço/Regime", "dem de Serviço"
